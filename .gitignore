@@ -1,0 +1,41 @@
+# ── 生成物：可重建的都不入库 ─────────────────────────────────
+# debug 下只留五件参与构建的脚本，其余（自检、对账、预览生成器、
+# 抓包导出）一律不入库 —— 用白名单而不是逐条黑名单，
+# 以后新加的调试脚本默认就在本地，不会误提交。
+debug/*
+!debug/build_font.js
+!debug/dist.js
+!debug/files.js
+!debug/pack.js
+!debug/zip.js
+dist/
+release/*.zip
+release/version.json
+
+# ── 本地资产：内部文档、使用者手册、自检与对账脚本 ───────────
+# 这些写的是真实口径与分发地址，只在本地保留。
+# 它们仍然有版本历史，但不在这个仓库里 —— 见 ops/vault.js（本地裸仓备份）。
+docs/
+用户手册.md
+test_offline.js
+ops/
+deploy/
+.github/
+
+# ── 报文与日志：含 token 头与 Cookie，或含设备短码 ───────────
+_har/
+*.har
+*.log
+_diag/
+
+# ── 开发环境杂物 ─────────────────────────────────────────────
+node_modules/
+.vscode/
+.idea/
+.env
+.env.*
+*.tmp
+*.bak
+coverage/
+.DS_Store
+Thumbs.db

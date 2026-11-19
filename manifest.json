@@ -1,0 +1,90 @@
+{
+  "manifest_version": 3,
+  "name": "简报助手",
+  "short_name": "简报助手",
+  "version": "1.10.3",
+  "description": "在业务页面上按模板整理可视化数据并生成为文字稿：自由文本模板、按需取数、多项交叉校验、精确到秒的时间基准、一键导出 txt。",
+  "author": "FARS-Assistant",
+  "minimum_chrome_version": "111",
+  "permissions": [
+    "storage",
+    "alarms",
+    "downloads"
+  ],
+  "host_permissions": [
+    "__SITE_ORIGIN__/*",
+    "__HT_ORIGIN__/bg-9f3a/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "__SITE_ORIGIN__/*"
+      ],
+      "js": [
+        "src/lib/util.js",
+        "src/lib/obs.js",
+        "src/lib/req.js",
+        "src/data/errors.js",
+        "src/data/release.js",
+        "src/data/contract.js",
+        "src/data/config.js",
+        "src/data/cloud.js",
+        "src/data/settings-schema.js",
+        "src/data/window.js",
+        "src/data/cas-last.js",
+        "src/data/faq.js",
+        "src/data/http.js",
+        "src/domain/render.js",
+        "src/domain/segments.js",
+        "src/domain/phrases.js",
+        "src/domain/checks.js",
+        "src/domain/report.js",
+        "src/ui/geom.js",
+        "src/ui/dom.js",
+        "src/ui/feedback.js",
+        "src/ui/editor.js",
+        "src/ui/sections.js",
+        "src/ui/faq.js",
+        "src/ui/checks.js",
+        "src/ui/settings.js",
+        "src/ui/panel.js",
+        "src/ui/sitehider.js",
+        "src/ui/nav.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "panel.css",
+        "fonts/ht-sans.woff2"
+      ],
+      "matches": [
+        "__SITE_ORIGIN__/*"
+      ]
+    }
+  ],
+  "action": {
+    "default_title": "简报助手 · 打开设置",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  }
+}
