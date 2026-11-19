@@ -46,7 +46,7 @@
     /** 服务器根（供 verify 与文档引用，不参与请求拼接以外的用途） */
     base: BASE,
     /** 必须与 manifest.json 的 version 一致（verify 会逐字核对） */
-    version: '1.10.3',
+    version: '1.10.4',
     /** 构建日期，只用于设置页的 title 提示 */
     build: '2026-11-19',
     /** 发布通道：stable | beta。beta 只影响提示措辞，不改变行为 */
