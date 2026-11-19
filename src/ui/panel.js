@@ -694,6 +694,10 @@
     /* 这一轮**真的被服务端拒过**。票面 exp 过去不算——exp 过去仍能取数，
        只有 401/403 才算。它决定状态可不可点、要不要提示去登录。 */
     let authDead = false;
+    /* 本机从没成功同步过、最近一次还失败了。这时屏上正文是按初始模板生成的，
+       不是云端那份——不说出来，人会以为自己在用云端配置出稿。
+       只多一句提示，不拦任何操作、不加可点区域。 */
+    let cloudMiss = false;
 
     const sessLife = () => {
       try { return HT.loginInfo(); } catch (e) { return null; }
@@ -741,10 +745,42 @@
         return;
       }
 
+      /* 配置这行排在票据之后：没票是「现在做不了」，配置不对是「做出来的可能不是你想要的」，
+         前者更急。两者同时成立先说票。 */
+      if (cloudMiss) {
+        stSess.hidden = false;
+        stSess.textContent = '未同步';
+        stEl.classList.remove('is-act');
+        stEl.title = '这台机器还没取回云端那份配置，当前正文按初始模板生成。'
+          + '网络恢复后会自动重试；也可以在设置页点「立即同步」。';
+        return;
+      }
+
       stSess.hidden = true;
       stSess.textContent = '';
       stEl.classList.remove('is-act');
       stEl.title = footTip;
+    }
+
+    /**
+     * 「屏上这份可能不是云端那份」要不要说出来。
+     *
+     * 判据只有两条同时成立：从没成功同步过（`at` 为空）＋ 最近一次确实失败（`fail` 有值）。
+     * 到这一步，正文就是按初始模板生成的，不提示的话人不会知道。
+     *
+     * 三种情况故意不提示：
+     *   · 云端本来就是空的（首次使用）：初始模板就是该用的那份，吓人没道理；
+     *   · 自动同步被关掉：那是使用者自己的选择，设置页已经写明「只存本机」；
+     *   · 成功过一次（`at` 有值）：这次没传上用的也是上次那份，不是初始模板。
+     */
+    function refreshCloudMiss() {
+      if (!HT.cloud || !HT.cloud.readMeta) return;
+      HT.cloud.readMeta().then(m => {
+        const next = !m.at && !!m.fail && m.auto !== false;
+        if (next === cloudMiss) return;
+        cloudMiss = next;
+        paintSess();
+      }).catch(() => { });
     }
 
     /** 去站点登录。新开一个标签，原标签不动——原标签里是已经写好的稿子。 */
@@ -1442,6 +1478,7 @@
        只在浮层关着时重排——人正在设置页里打字，底下的稿子跟着跳没有意义。 */
     try {
       g.addEventListener('ht-cloud-pulled', () => {
+        refreshCloudMiss();
         if (!isOpen() || setOpen || busy) return;
         HT.loadCfg().then(c => {
           cfg = c;
@@ -1478,7 +1515,7 @@
       /* 页面一打开就对一次云端（cloud.js 自带 60 秒限流，多次触发不会重复请求）。
          往后延 1.5 秒：先让页面和面板自己起来，别和首屏抢带宽。 */
       setTimeout(() => {
-        try { HT.cloud.boot().catch(() => { }); } catch (e) { }
+        try { HT.cloud.boot().then(() => refreshCloudMiss()).catch(() => { }); } catch (e) { }
       }, 1500);
     }).catch(e => {
       /* 读不到配置就不该继续：用户改过的模板与出厂模板措辞可能完全不同，
