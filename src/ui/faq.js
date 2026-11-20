@@ -184,7 +184,7 @@
         gi++;
         return body;
       }).join('');
-      list.innerHTML = html || '<div class="fq-none">没有匹配的问题，换个词试试</div>';
+      list.innerHTML = html || '<div class="fq-none">未找到匹配的问题，请更换关键词</div>';
       cnt.textContent = q ? total + ' 条' : '共 ' + total + ' 条';
       /* 分类条上的条数是"这一类一共几条"，与筛选后的条数不是一回事，
          所以分类条只在未搜索时画——那时两者才相等。 */
