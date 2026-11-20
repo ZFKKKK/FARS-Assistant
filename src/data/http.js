@@ -471,27 +471,25 @@
       [DETAIL_WINDOW.warning.start]: win.s.getTime(),
       [DETAIL_WINDOW.warning.end]: win.e.getTime()
     };
-    /* `areaGroupStaticFlag` 是"按全部记录统计"的开关：**带上它，time 传空数组也照旧回全量**。
-       上一版只清了 time、没清它，于是 fireOnly 拿到的仍是全记录处置
-       （实测正文写出 403 辆次 / 2421 人次，页面勾「一类」是 142 / 827）。
-       一类模式要两样都不给：A1 那份能复现的请求体就是
-       `time: []` + warningReq 里只有起止时间。 */
+    /* `areaGroupStaticFlag`：**2026-11-20 七组对照实测，加不加返回值完全相同**
+       （time 空数组时 95/95，time 三项时 96/96），它不该被当成"全量开关"。
+       留着无害（照抄页面），但别在它上面找原因。 */
     if (!fireOnly) body[DETAIL_WINDOW.warning.key].areaGroupStaticFlag = HEAD_QUERY.areaGroupStaticFlag;
-    /* 条目域的这两个字段是**同一个开关的三个把手**，谁也不能单独看：
-         全量        ：time = [起, 止, null]、warningReq 带 areaGroupStaticFlag、fireReq = {}
-         只一类   ：time = []、         warningReq 不带它、               fireReq = {起, 止}
-       三种形态在服务端都不报错，只是数值量级不同（差一个量级）。
-       页面在 fireType=1 时传的是"全量"形态，此前照抄它，于是要子集的地方拿到的
-       全是全记录——正文写出 403 辆次 / 2421 人次，而页面勾「一类」是 142 / 827。
+    /* 2026-11-20 七组对照（fireType=1，同一窗口）：**真正决定全量还是子集的，
+       只有条目域那个 Req 对象一项（`DETAIL_WINDOW.fire.key`）**——
+         fireReq = {}  → warningCount 95（time 空）/ 96（time 三项）
+         fireReq = 有值 → warningCount 14 = fireFighting（哪一种 time 都一样）
+       `time` 只挪窗口边界（96 比 95 多含结束那一秒），不换模式；
+       `areaGroupStaticFlag` 毫无影响。此前以为"三个把手必须成组"，是错的；
+       三种形态服务端都不报错，所以只能靠对照实验才看得出来。
        （明细走 fireType=4，fireReq 必须填，那是另一套规矩，别互相抄。） */
     body[DETAIL_WINDOW.fire.key] = fireOnly ? {
       [DETAIL_WINDOW.fire.start]: win.s.getTime(),
       [DETAIL_WINDOW.fire.end]: win.e.getTime()
     } : {};
     /* 页面还传了这个 time 数组：UTC 的 ISO 串，三项——开始 / 结束（毫秒补到 .999）/ null。
-       传空数组时服务端按"某一类"统计，有值才按全量；两者的 warningCount 差了整整一个
-       量级（实测：空数组给出的是一类数）。结束补 .999 是为了把那一秒整含进去，
-       与页面请求逐字一致。 */
+       **它只决定窗口边界，不决定全量还是一类**（2026-11-20 实测：空数组 95、三项 96，
+       差的就是结束那一秒）。补 .999 是为了把那一秒整含进去，与页面请求逐字一致。 */
     body.time = fireOnly ? [] : [
       win.s.toISOString(),
       new Date(win.e.getTime() + 999).toISOString(),
@@ -710,9 +708,18 @@
         body: JSON.stringify(body)
       }, REPORT_TIMEOUT);
       try { j = await r.json(); } catch (e) { j = null; }
-      if (!j || !j.data || !Array.isArray(j.data.result)) {
-        throw err('DATA', '报表接口没回 result 数组',
-          { status: j ? String(j.code) : '' });
+      /* 票据没了的时候服务端**不给 401/403**，而是 200 + 登录页 HTML
+         （2026-11-20 实测：错 token / 缺 token 都是 text/html，状态码照旧 200）。
+         所以这里必须与 fetchReport / fetchDetail 同一套判法——少了这一句，
+         票据失效会被归成 DATA，authDead 永不置位，界面永远不提示「请登录」，
+         人只看到一句看不懂的「报表接口没回 result 数组」。 */
+      if (!j) throw err('AUTH', '响应不是 JSON（多半已被重定向到登录页）');
+      const code = String(j.code || '');
+      if (code === '401' || code === '403' || code === '-1') {
+        throw err('AUTH', `票据被拒（${code}）`, { status: code });
+      }
+      if (!j.data || !Array.isArray(j.data.result)) {
+        throw err('DATA', '报表接口没回 result 数组', { status: code });
       }
     } catch (e) {
       throw tagSource(label, e);
