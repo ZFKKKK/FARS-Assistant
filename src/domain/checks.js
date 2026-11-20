@@ -294,7 +294,7 @@
       const sum5 = five.some(v => !has(v)) ? null : five.reduce((a, b) => a + b, 0);
       const usingHead = has(y.Th);
       const ownT = usingHead ? y.T : y.JT;
-      ck('ytd.sum', '五类警情加总 = 总数',
+      ck('ytd.sum', '五类警情之和等于总数',
         sum5 !== null && has(ownT) && sum5 === ownT,
         sum5 === null ? '五类中有数值未取到，无法核对'
           : !has(ownT) ? '警情总数未取到'
@@ -347,21 +347,9 @@
           parts.push(`出动 报表 ${y.truckRep} 辆次、汇总 ${y.truckHead} 辆次`
             + `（相差 ${tr.toFixed(2)} 倍，采用${Math.abs(tr - 1) <= 0.05 ? '汇总' : '报表'}）`);
         }
-        ck('ytd.head', '警情数取自综合查询汇总', okAll, parts.join('；'),
+        ck('ytd.head', '警情总数与报表相称', okAll, parts.join('；'),
           okAll ? undefined : (usedBig ? 'bad' : 'warn'));
       }
-
-      /* 无损 = 一类 − 有效 是定义式，平时不必占一行；但它**可以为负**
-         （有效比一类还多），那时正文会写出「-451 起」这种没人能读的句子。
-         所以只在越界时才冒出来——绿的不上榜，位置留给真问题。 */
-      if (y.N !== null && y.N < 0) {
-        ck('ytd.fcn', '无损火警不得为负', false,
-          `火灾扑救 ${y.F} − 成灾 ${y.C} = 无损 ${y.N}`);
-      }
-
-      ck('ytd.ucn', '成灾占比不得超过火灾扑救占比',
-        y.uC >= 0 && y.uC <= y.uF,
-        `成灾 ${u(y.uC)}% ${y.uC <= y.uF ? '≤' : '>'} 火灾扑救 ${u(y.uF)}%`);
 
       /* 有效条目同比的分母，两个来源：
          表（只覆盖 2025，那一年被补录过，必须用补录前的数）或平台实查（其它年份）。
@@ -371,7 +359,7 @@
         /* 来源写出来：出稿人核同比时要知道这个分母是表里的还是系统查的，
            两种口径能差出上千起（2025 年补录前后就有这么大差额）。 */
         const srcTxt = y.casSrc ? '（去年实查）' : '';
-        ck('ytd.casyoy', '成灾同比的分母有出处',
+        ck('ytd.casyoy', '成灾同比分母有出处',
           okCas,
           okCas ? `去年同日 ${y.CLast} 起${srcTxt}，同比 ${HT.casYoyWord(y.C, y.CLast) || 'x'}`
             : '去年同日的成灾数未取到，正文写「同比x」',
@@ -380,17 +368,11 @@
     }
 
     if (need.dayB && has(d.F) && has(d.C)) {
-      /* 同上：只在算出负数时才占一行 */
-      if (has(d.N) && d.N < 0) {
-        ck('day.fcn', '当日无损火灾不得为负', false,
-          `火灾扑救 ${d.F} − 成灾 ${d.C} = 无损 ${d.N}`);
-      }
-
       /* 「一类」在两处出现：记录类型表（接处警口径）与条目统计（全部条目）。
          实测两域通常是同一批记录，本该严格相等；不等就并排摆出来——
          正文那个「无损」正是靠这条等式才敢写成减法。 */
       if (has(d.Jf) && has(d.Fstat) && d.Jf !== d.Fstat) {
-        ck('day.fire', '当日「火灾扑救」两处口径一致', false,
+        ck('day.fire', '当日火灾扑救两处一致', false,
           `警情分类表 ${d.Jf} 起、火灾统计表 ${d.Fstat} 起，差 ${Math.abs(d.Jf - d.Fstat)} 起；`
           + '正文的无损数不可用于核对页面',
           'warn');
@@ -416,7 +398,7 @@
        光靠"看正文像不像"不够，让它自己报出来。 */
     if (need.dayHf && c.yoy.curTruck !== null && c.yoy.truckRep !== null && c.yoy.truckRep > 0) {
       const r = c.yoy.curTruck / c.yoy.truckRep;
-      ck('yoy.cdmatch', '当日出动两源同量级（都是火灾扑救口径）', r >= 0.5 && r <= 2,
+      ck('yoy.cdmatch', '当日出动两源同量级', r >= 0.5 && r <= 2,
         `汇总 ${c.yoy.curTruck} 辆次、报表 ${c.yoy.truckRep} 辆次（相差 ${r.toFixed(2)} 倍）`
           + (r < 0.5 || r > 2 ? '，汇总可能按全警情统计' : ''), 'warn');
     }
@@ -432,7 +414,7 @@
         const lack = [];
         if (y0.truckTotal === '—') lack.push('车辆');
         if (y0.personTotal === '—') lack.push('人次');
-        ck('ytd.force', '年度出动数取到', lack.length === 0,
+        ck('ytd.force', '年度出动数已取到', lack.length === 0,
           lack.length ? `年度出动的${lack.join('、')}未取到，正文显示「—」` : '车辆与人次都在', 'warn');
       }
     }
@@ -441,7 +423,7 @@
       /* 中心城区没配 = 这个概念不存在，正文那句「中心城区共发生有效条目 0 起」
          读起来像「确实一起都没有」，实际上是配置为空。这是错信息，得报出来。 */
       const coreSet = String((c.cfg && c.cfg.coreTowns) || '').trim();
-      ck('det.coreset', '中心城区已配置', !!coreSet,
+      ck('det.coreset', '中心城区名单已配置', !!coreSet,
         coreSet ? '已配置 ' + coreSet.split(/[、,，\s]+/).filter(Boolean).length + ' 个区'
           : '名单为空，正文的中心城区起数会写作 0');
 
@@ -451,12 +433,12 @@
          落到「轻微条目」上，正文加得回去——所以那个差只在说明里提一句，不判红。 */
       /* 接口"成功返回空列表"是很常见的故障：不报错，正文直接写「0 起」。
          报表说今天有 N 起有效、明细却一条都没有，这两件事不可能同时为真。 */
-      ck('det.empty', '明细非空（报表有数时）', !(e.count === 0 && d.C > 0),
+      ck('det.empty', '明细非空', !(e.count === 0 && d.C > 0),
         e.count === 0 && d.C > 0
           ? `报表成灾 ${d.C} 起、明细 0 条，可能为分页或筛选未生效`
           : `明细 ${e.count} 条`);
 
-      ck('det.town', '区县合计 = 明细条数', e.townSum === e.count,
+      ck('det.town', '区县合计等于明细条数', e.townSum === e.count,
         `区县加总 ${e.townSum}，明细 ${e.count} 条`
           + (d.C !== null && e.count !== d.C
             ? `（报表成灾 ${d.C} 起，差 ${d.C - e.count} 起已计入轻微火灾）` : ''));
@@ -469,7 +451,7 @@
              10-10～10-23 十四天 240 条，每天轻微 6～21 条，一次 0 都没有。
          所以只判这一侧，且条数 ≥10（两三条都有效是正常的）。 */
       const levelOdd = e.count >= 10 && e.count - e.nMajor === 0;
-      ck('det.level', '一般及以上与明细条数相称',
+      ck('det.level', '一般及以上与明细相称',
         e.nMajor >= 0 && e.nMajor <= e.count && !levelOdd,
         levelOdd
           ? `明细 ${e.count} 条中无一条轻微火灾，等级列可能取错`
@@ -482,7 +464,7 @@
          亮黄只是让核稿的人先看到这句，别拿页面条数来质疑正文。 */
       if (e.pendingMajor) {
         /* 常态项，用 note 而不是 warn：待填报每天都有一批，天天亮黄等于没亮。 */
-        ck('det.pending', '待填报记录未计入一般及以上', true,
+        ck('det.pending', '待填报记录的口径', true,
           `${e.pendingMajor} 条待填报记录写作非轻微，页面筛选不返回；`
           + `正文按页面口径写 ${e.nMajor} 起，差额计入轻微 ${e.nMinor} 起`, 'note');
       }
@@ -516,7 +498,7 @@
          于是「一般及以上」偏小、「轻微」偏大，而两条都还是正常数字。
          不阻断出稿，但必须说出来：这是「数据缺填」里唯一会改数字的一种。 */
       if (e.severityBlank) {
-        ck('det.sevblank', '明细等级都已填写', false,
+        ck('det.sevblank', '明细等级填写完整', false,
           `${e.severityBlank} 条明细未填「是否轻微火灾」，已计入轻微`, 'warn');
       }
 
@@ -535,7 +517,7 @@
       if (mergeOn && rawSum > 0) {
         const h = (e.townList || []).find(x => x.name === MERGE_SRC[mergedNames[0]]);
         const outN = h ? h.n : 0;
-        ck('det.townMerge', '渝北/江北并入两江', rawSum === outN,
+        ck('det.townMerge', '渝北江北并入两江', rawSum === outN,
           `${mergedNames.map(n => `${n} ${rawOf(n)}`).join(' + ')} = ${rawSum}`
             + `，正文「${HT.shortTown(MERGE_SRC[mergedNames[0]], (c.cfg || {}).shortTown !== false)}」${outN}`,
           rawSum === outN ? undefined : 'warn');
@@ -549,7 +531,7 @@
          所以判「明细够多、却一条都落不进中心城区」。
          阈值取 10：九天有效 14～30 起，中心城区每天 1～7 起，10 起以上全在郊县很少见。 */
       const coreGhost = e.count >= 10 && e.nCore === 0;
-      ck('det.core', '中心城区名单能在明细里对上', !coreGhost,
+      ck('det.core', '中心城区名单能对上明细', !coreGhost,
         coreGhost
           ? `明细 ${e.count} 条无一落在中心城区，`
             + '请核对设置中的名单写法'

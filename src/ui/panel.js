@@ -395,7 +395,10 @@
         pos: panelPos,
         anchor: panelAnchor,
         styleTop: parseFloat(panel.style.top),
-        focus: !!(S && S.isFocus())
+        focus: !!(S && S.isFocus()),
+        /* 一段都没有就是空态：下限换成 440，否则点开只有一条缝。
+           有段落（哪怕全收起）仍按 200，收起后不留一大片空白。 */
+        empty: !outBox.querySelector('.ht-item')
       });
       panel.style.maxHeight = box.max + 'px';
       panel.style.minHeight = box.floor + 'px';
@@ -1114,6 +1117,10 @@
          否则状态字会一直挂着可点的样子去劝人重登。 */
       authDead = false;
       setState('done');
+      /* 出稿后重算一次上限与下限：正文从'一段都没有'变成'四段'，
+         空态那条 440 的下限该让开了，上限也要跟着当前落位重算。
+         以前只在开面板时算一次，结果是'生成完高度不动、拖一下才变'。 */
+      fitPanelBox();
       const now = new Date();
       const tm = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
       /* 第三类"数据拿到了但校验不通过"就在这里说清楚：稿子生成了，但数字互相矛盾。
