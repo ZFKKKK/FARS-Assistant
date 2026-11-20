@@ -105,17 +105,28 @@
       return Object.keys(docs).map(k => ({
         key: k,
         q: docs[k].name,
-        a: '<p>' + docs[k].what + '</p>' +
-          '<p><b>红了通常意味着：</b>' + docs[k].why + '</p>' +
-          '<p><b>怎么办：</b>' + docs[k].fix + '</p>'
+        a: '<p><b>核对内容：</b>' + docs[k].what + '</p>' +
+          '<p><b>异常含义：</b>' + docs[k].why + '</p>' +
+          '<p><b>处置方法：</b>' + docs[k].fix + '</p>'
       }));
     }
 
     function faqGroups() {
-      const out = (HT.FAQ || []).map(g => ({
-        g: g.g, mod: g.mod, ver: g.ver, upd: g.upd, rel: g.rel,
-        items: g.key === 'checks' ? g.items.concat(checkEntries()) : g.items
-      }));
+      /* 校验说明单独成组（1.10.5）。它原本并进「数据校验」组，与「怎么读校验结果」
+         那五条混在一起——一组三十一条，读者找不到头。两者是两个模块：
+         前者讲这一栏怎么用，后者是每条判据在核什么。 */
+      const out = [];
+      (HT.FAQ || []).forEach(g => {
+        out.push({ g: g.g, mod: g.mod, ver: g.ver, upd: g.upd, rel: g.rel, items: g.items });
+        if (g.key === 'checks') {
+          const docs = checkEntries();
+          if (docs.length) {
+            out.push({
+              g: '校验项说明', mod: '自动核对', ver: g.ver, upd: g.upd, rel: '', items: docs
+            });
+          }
+        }
+      });
       /* 已知问题单独成组，排在最后：它不是"解答"，是"确实会出错的清单"。
          两者混在一列里，读者会以为"已知问题"也是一种解释。 */
       const ki = (HT.KNOWN_ISSUES || []).map(k => ({

@@ -296,9 +296,9 @@
       const ownT = usingHead ? y.T : y.JT;
       ck('ytd.sum', '五类警情加总 = 总数',
         sum5 !== null && has(ownT) && sum5 === ownT,
-        sum5 === null ? '五类里有取不到的数，无法对账'
-          : !has(ownT) ? '本表总数取不到'
-            : `${five.join('+')} = ${sum5}，${usingHead ? '汇总总数' : '本表总数'} ${ownT}`
+        sum5 === null ? '五类中有数值未取到，无法核对'
+          : !has(ownT) ? '警情总数未取到'
+            : `五类合计 ${sum5}，${usingHead ? '汇总' : '报表'}总数 ${ownT}`
               + (sum5 === ownT ? '' : `（差 ${sum5 - ownT}）`));
 
       /* 正文的记录数吃的是「汇总」还是「报表」——这件事决定稿子与页面能不能对上。
@@ -313,7 +313,8 @@
         const missAll = hd.miss || [];
         const miss = missAll.filter(k => CORE.indexOf(k) >= 0);
         const gotCore = CORE.filter(k => missAll.indexOf(k) < 0).length;
-        const keys = (hd.keys && hd.keys.length) ? hd.keys.slice(0, 8).join('、') : '（空）';
+        const CORE_NAME = { T: '警情总数', F: '火灾扑救', Q: '抢险救援', S: '社会救助及其他',
+          A: '安保勤务', X: '虚假警', truck: '出动车辆', person: '出动人次' };
         /* 差额要用**汇总原样给的总数**（rawT）来算，不能用 y.Th：
            Th 是「过了 0.5% 过滤才算数」的那个值，差得越远越会被过滤成 null，
            于是「差几百上千起」永远算不出来，红灯也就永远亮不起来。 */
@@ -329,22 +330,22 @@
            晃久了人就不再抬眼看这一栏，真问题反而没人发现。 */
         const usedBig = !!hd.used && big;
         const parts = [];
-        if (!hd.box) parts.push(`响应里没有汇总对象（字段 ${keys}）`);
-        else parts.push(`汇总对象 ${hd.box}`);
-        parts.push(`认到 ${gotCore}/${CORE.length} 项`);
-        if (miss.length) parts.push(`缺 ${miss.join('/')}`);
-        if (!hd.used) parts.push('正文用的是报表口径，没受影响');
+        if (!hd.box) parts.push('页面未返回汇总行');
+        else parts.push('已识别汇总行');
+        parts.push(`八项中认到 ${gotCore} 项`);
+        if (miss.length) parts.push(`未识别 ${miss.map(k => CORE_NAME[k] || k).join('、')}`);
+        if (!hd.used) parts.push('正文已改取报表口径，不受影响');
         if (diff !== null && diff !== 0) {
-          parts.push(`报表 ${y.Trep} / 汇总 ${rawT}，差 ${Math.abs(diff)} 起`
-            + (hd.used ? '' : '（这组汇总没被采用）'));
+          parts.push(`报表 ${y.Trep} 起、汇总 ${rawT} 起，差 ${Math.abs(diff)} 起`
+            + (hd.used ? '' : '（该汇总未采用）'));
         }
         /* 处置的闸门比起数宽（5% 对 0.5%），两源常年差 2～3%——
            不说出来，读的人看到"正文 155275、页面 150520"只会以为又混账了。
            这里只并排写，不改结论：正文取哪一个由 report.js 的 trust 决定。 */
         if (has(y.truckRep) && has(y.truckHead)) {
           const tr = y.truckHead / y.truckRep;
-          parts.push(`出动 报表 ${y.truckRep} / 汇总 ${y.truckHead}`
-            + `（比 ${tr.toFixed(2)}，取${Math.abs(tr - 1) <= 0.05 ? '汇总' : '报表'}）`);
+          parts.push(`出动 报表 ${y.truckRep} 辆次、汇总 ${y.truckHead} 辆次`
+            + `（相差 ${tr.toFixed(2)} 倍，采用${Math.abs(tr - 1) <= 0.05 ? '汇总' : '报表'}）`);
         }
         ck('ytd.head', '警情数取自综合查询汇总', okAll, parts.join('；'),
           okAll ? undefined : (usedBig ? 'bad' : 'warn'));
@@ -369,12 +370,11 @@
         const okCas = has(y.CLast) && y.CLast > 0;
         /* 来源写出来：出稿人核同比时要知道这个分母是表里的还是系统查的，
            两种口径能差出上千起（2025 年补录前后就有这么大差额）。 */
-        const srcTxt = y.casSrc === 'table' ? '（表内补录前数）'
-          : y.casSrc === 'platform' ? '（平台去年同期实查）' : '';
+        const srcTxt = y.casSrc ? '（去年实查）' : '';
         ck('ytd.casyoy', '成灾同比的分母有出处',
           okCas,
-          okCas ? `${y.C} ÷ ${y.CLast}${srcTxt} = 同比${HT.casYoyWord(y.C, y.CLast) || 'x'}`
-            : '去年年初至今的成灾数没取到，正文写「同比x」',
+          okCas ? `去年同日 ${y.CLast} 起${srcTxt}，同比 ${HT.casYoyWord(y.C, y.CLast) || 'x'}`
+            : '去年同日的成灾数未取到，正文写「同比x」',
           okCas ? undefined : 'warn');
       }
     }
@@ -391,8 +391,8 @@
          正文那个「无损」正是靠这条等式才敢写成减法。 */
       if (has(d.Jf) && has(d.Fstat) && d.Jf !== d.Fstat) {
         ck('day.fire', '当日「火灾扑救」两处口径一致', false,
-          `警情类型表 ${d.Jf} / 火灾统计 ${d.Fstat}，差 ${d.Jf - d.Fstat}；`
-          + '两个域已各算各的，正文的无损（火扑 − 成灾）不能再拿去核页面',
+          `警情分类表 ${d.Jf} 起、火灾统计表 ${d.Fstat} 起，差 ${Math.abs(d.Jf - d.Fstat)} 起；`
+          + '正文的无损数不可用于核对页面',
           'warn');
       }
     }
@@ -406,7 +406,7 @@
       const wantsForce = ts.some(t => /yoy\.(curTruck|curPerson)|seg:detail/.test(String(t.text || '')));
       if (wantsForce) {
         ck('yoy.cd', '当日出动力量已返回', false,
-          '综合查询与 CD_01 都没有给出动数，正文出动车辆与人次显示「—」', 'warn');
+          '两个来源均未取到出动数，正文显示「—」', 'warn');
       }
     }
 
@@ -417,8 +417,8 @@
     if (need.dayHf && c.yoy.curTruck !== null && c.yoy.truckRep !== null && c.yoy.truckRep > 0) {
       const r = c.yoy.curTruck / c.yoy.truckRep;
       ck('yoy.cdmatch', '当日出动两源同量级（都是火灾扑救口径）', r >= 0.5 && r <= 2,
-        `汇总 ${c.yoy.curTruck} 辆次 / 报表 ${c.yoy.truckRep} 辆次（比 ${r.toFixed(2)}）`
-          + (r < 0.5 || r > 2 ? '——汇总那次多半取成了全警情口径' : ''), 'warn');
+        `汇总 ${c.yoy.curTruck} 辆次、报表 ${c.yoy.truckRep} 辆次（相差 ${r.toFixed(2)} 倍）`
+          + (r < 0.5 || r > 2 ? '，汇总可能按全警情统计' : ''), 'warn');
     }
 
     /* 年度那两句的处置是**字符串**兜底（缺数时是「—」），不是 null——
@@ -433,7 +433,7 @@
         if (y0.truckTotal === '—') lack.push('车辆');
         if (y0.personTotal === '—') lack.push('人次');
         ck('ytd.force', '年度出动数取到', lack.length === 0,
-          lack.length ? `年度出动的${lack.join('、')}没取到，正文写「—」` : '车辆与人次都在', 'warn');
+          lack.length ? `年度出动的${lack.join('、')}未取到，正文显示「—」` : '车辆与人次都在', 'warn');
       }
     }
 
@@ -442,8 +442,8 @@
          读起来像「确实一起都没有」，实际上是配置为空。这是错信息，得报出来。 */
       const coreSet = String((c.cfg && c.cfg.coreTowns) || '').trim();
       ck('det.coreset', '中心城区已配置', !!coreSet,
-        coreSet ? coreSet.split(/[、,，\s]+/).filter(Boolean).length + ' 个区县'
-          : '未配置中心城区，正文里「中心城区…0 起」不成立');
+        coreSet ? '已配置 ' + coreSet.split(/[、,，\s]+/).filter(Boolean).length + ' 个区'
+          : '名单为空，正文的中心城区起数会写作 0');
 
       /* 区域加总 = **明细条数**，不是报表有效数。
          每一起来火都要落到某个区域名下，加不回去只可能是「有记录的区域为空」，
@@ -453,13 +453,13 @@
          报表说今天有 N 起有效、明细却一条都没有，这两件事不可能同时为真。 */
       ck('det.empty', '明细非空（报表有数时）', !(e.count === 0 && d.C > 0),
         e.count === 0 && d.C > 0
-          ? `报表成灾 ${d.C} 起，明细 0 条——多半是分页或筛选没取到，不是当天真没有`
+          ? `报表成灾 ${d.C} 起、明细 0 条，可能为分页或筛选未生效`
           : `明细 ${e.count} 条`);
 
       ck('det.town', '区县合计 = 明细条数', e.townSum === e.count,
         `区县加总 ${e.townSum}，明细 ${e.count} 条`
           + (d.C !== null && e.count !== d.C
-            ? `（报表成灾 ${d.C}，差 ${d.C - e.count} 起已记「轻微火灾」）` : ''));
+            ? `（报表成灾 ${d.C} 起，差 ${d.C - e.count} 起已计入轻微火灾）` : ''));
 
       /* 这条判的是**等级列有没有被读成常量**。两种"常量"里只有一种能判：
            全认成「轻微」→ 一般及以上 0 起。这个**真实会自然出现**：
@@ -472,7 +472,7 @@
       ck('det.level', '一般及以上与明细条数相称',
         e.nMajor >= 0 && e.nMajor <= e.count && !levelOdd,
         levelOdd
-          ? `明细 ${e.count} 条里一条「轻微火灾」都没有，等级列可能被读成常量，或读错了列`
+          ? `明细 ${e.count} 条中无一条轻微火灾，等级列可能取错`
           : `一般及以上 ${e.nMajor}，明细 ${e.count}，轻微 ${e.nMinor}`,
         levelOdd ? 'warn' : undefined);
 
@@ -483,9 +483,8 @@
       if (e.pendingMajor) {
         /* 常态项，用 note 而不是 warn：待填报每天都有一批，天天亮黄等于没亮。 */
         ck('det.pending', '待填报记录未计入一般及以上', true,
-          `${e.pendingMajor} 条待填报记录在明细里写着「非轻微火灾」，`
-          + `页面按「是否轻微火灾＝否」筛不返回；正文按页面口径写 ${e.nMajor} 起，`
-          + `差额已并入轻微 ${e.nMinor} 起`, 'note');
+          `${e.pendingMajor} 条待填报记录写作非轻微，页面筛选不返回；`
+          + `正文按页面口径写 ${e.nMajor} 起，差额计入轻微 ${e.nMinor} 起`, 'note');
       }
 
       /* 「已查明 + 待查 = 明细条数」是定义出来的恒等式（待查 = 条数 − 已查明），判它没意义。
@@ -494,8 +493,8 @@
          后果是正文退化成「起火原因主要为：其余正在调查中」，且没有任何提示。 */
       ck('det.cause', '起火原因读得到', !(e.count > 0 && e.causeSum === 0),
         e.count > 0 && e.causeSum === 0
-          ? `明细 ${e.count} 条全部没有原因值，多半是字段名变了；`
-            + '正文那句会退化成「其余正在调查中」'
+          ? `明细 ${e.count} 条均无原因值，`
+            + '正文会退化为「其余正在调查中」'
           : `已查明 ${e.causeSum}，待查 ${e.caused}`);
 
       /* 明细里混进了窗口外的记录（按起火时间判）。
@@ -509,8 +508,8 @@
          被页面的筛选漏掉，与时间窗无关，见 口径实测记录 §21 五之补二。） */
       if (e.detOutWin) {
         ck('det.window', '明细都在本期窗口内', false,
-          `${e.detOutWin} 条明细的起火时间不在本期内，一般及以上可能偏多；`
-          + '去页面按同一窗口核「是否轻微火灾＝否」的条数', 'warn');
+          `${e.detOutWin} 条明细的起火时间不在本期，一般及以上可能偏多；`
+          + '请按同一窗口核对页面条数', 'warn');
       }
 
       /* 未填等级的记录会被算进「轻微条目」（majorAll 只认「非轻微条目」），
@@ -518,7 +517,7 @@
          不阻断出稿，但必须说出来：这是「数据缺填」里唯一会改数字的一种。 */
       if (e.severityBlank) {
         ck('det.sevblank', '明细等级都已填写', false,
-          `${e.severityBlank} 条明细未填等级，已按轻微火灾计入`, 'warn');
+          `${e.severityBlank} 条明细未填「是否轻微火灾」，已计入轻微`, 'warn');
       }
 
       /* 渝北、江北在正文里并成「两江」，但系统里是分开的三个区域。
@@ -552,8 +551,8 @@
       const coreGhost = e.count >= 10 && e.nCore === 0;
       ck('det.core', '中心城区名单能在明细里对上', !coreGhost,
         coreGhost
-          ? `明细 ${e.count} 条里没有一条落在中心城区，检查设置里的名单写法`
-            + '（平台给的是「渝中区」「垫江县」这种全名）'
+          ? `明细 ${e.count} 条无一落在中心城区，`
+            + '请核对设置中的名单写法'
           : `中心城区 ${e.nCore} 起，其中一般及以上 ${e.nCoreMajor}，轻微 ${e.nCoreMinor}`,
         coreGhost ? 'warn' : undefined);
 
@@ -567,8 +566,8 @@
       /* 占比必须是平台给的那一列。自算是降级路径，写出来的数会与页面不一致，
          所以降级这件事本身就要说出来，而不是静默出一个「看着像」的百分比。 */
       ck('ty.src', '类型占比照抄平台', ty.shareSrc === 'platform',
-        ty.shareSrc === 'platform' ? 'HZ_21 的 share 列直接取'
-          : 'HZ_21 的 share 列没认出来，按六类之和自算', 'warn');
+        ty.shareSrc === 'platform' ? '占比列直接取自平台'
+          : '占比列未识别，按六类之和自算', 'warn');
       /* 平台的分母是同一响应里的有效起数（HZ_01[2]），不是六类之和。
          六类一旦交叉归类（加总 ≠ 有效），拿加总当分母就会整句跑偏，
          所以这里逐项核：占 ≈ 起数 ÷ 有效。
@@ -584,7 +583,8 @@
       }
     }
 
-    if (c.yoy.lastMiss) ck('last.miss', '去年同日明细可用', false, c.yoy.lastErr, 'warn');
+    if (c.yoy.lastMiss) ck('last.miss', '去年同日明细可用', false,
+      '去年同日明细未取到：' + c.yoy.lastErr, 'warn');
     if (e.lastTruncated) {
       ck('last.trunc', '去年同日明细未截断', false,
         HT.detailTruncText(e.lastPaged, e.lastPages, e.lastCount), 'warn');
@@ -621,7 +621,7 @@
       + `（差 ${dAll}）；中心城区 明细 ${m.detCore}／报表 ${m.rptCore}（差 ${dCore}）`
       + (m.pending ? `；当天明细里有 ${m.pending} 条待填报` : '');
     ck('cross.rpt', '报表口径互校', !big,
-      big ? body + '。差 3 起以上：先看报表的 isNoDamage 带没带，再看中心城区名单写法' : body,
+      big ? body + '。差 3 起以上，请核对报表筛选与中心城区名单写法' : body,
       big ? 'bad' : (same ? 'ok' : 'note'));
     return out[0];
   }
