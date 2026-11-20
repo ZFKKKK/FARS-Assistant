@@ -1591,6 +1591,60 @@
   box-shadow: inset 0 0 0 1px var(--ht-ac), 0 0 0 3px rgb(var(--ht-brand-rgb) / .16);
 }
 
+/* 分类条（1.10.6）：清单到五十条以后，靠滚动找一类问题不现实。
+   横排、换行铺满、只在未搜索时出现——搜索时用户在按词找，两套导航同时摆会打架。
+   与下面的分类标题分工：这里是目录，那里是正文里的分隔。 */
+.fq-nav {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ht-nudge);
+  padding: 0 var(--ht-s2) var(--ht-s2);
+}
+.fq-nav[hidden] { display: none; }
+.fq-chip {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-pill);
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-2);
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease;
+}
+.fq-chip:hover { background: var(--ht-bg-3); }
+.fq-chip.on { background: var(--ht-ink-1); color: var(--ht-bg-0); }
+.fq-chip:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+/* 分类导语：常驻、不折叠。它回答「这一组在讲什么」，
+   读者不该为了知道一组讲什么而先点开一条。 */
+.fq-intro {
+  margin: 0 0 var(--ht-s2);
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-1);
+  font-size: var(--ht-t2);
+  line-height: var(--ht-lh-body);
+  color: var(--ht-ink-2);
+}
+
+/* 对照清单：四行「名称 + 一句定位」。
+   不做表格——面板只有 400 宽，四列表格每列不到 90，读到第三列就换行，
+   比清单更难扫。名称定宽、说明吃掉剩余宽度，眼睛沿一列对齐往下走即可。 */
+.fq-dl {
+  display: grid;
+  grid-template-columns: 4.2em 1fr;
+  gap: var(--ht-nudge) var(--ht-s2);
+  margin: 0;
+}
+.fq-dl dt {
+  font-weight: var(--ht-w-bold);
+  color: var(--ht-ink-1);
+}
+.fq-dl dd { margin: 0; }
+
 .fq-list {
   /* 必须是定位容器：面板里用 offsetTop 把某一条滚到眼前，
      若这里不定位，offsetTop 会相对 .ht-faq 算，凭空多出标题与搜索框那 90px */

@@ -2,14 +2,20 @@
  * src/ui/faq.js —— 面板里的「口径与常见问题」浮层
  *
  * @file      src/ui/faq.js
- * @version   1.6.16
- * @build     2026-11-13
+ * @version   1.10.6
+ * @build     2026-11-20
  * @license   MIT
  *
- * 统一合集：窗口口径、术语、校验项说明、导出差异、界面操作，全在一个浮层里。
- * 校验项按 key 引到同一份 CHECK_DOCS —— 规则改了不会出现"说明跟代码对不上"。
+ * 统一合集：窗口口径、四个查询入口、术语、校验项说明、导出差异、界面操作，
+ * 全在一个浮层里。校验项按 key 引到同一份 CHECK_DOCS —— 规则改了不会出现
+ * "说明跟代码对不上"。
  * 浮层只盖住 .ht-body，标题栏和状态栏不动，所以它仍然"在面板里"，
  * 不是又一个窗口（这一点和专注一致）。
+ *
+ * 分层（1.10.6）：搜索框 → 分类条 → 分类标题 + 导语 + 条目。
+ * 分类条是"目录"：清单已到五十条，靠滚动找一类问题不现实，先把类摆出来，
+ * 点一下跳过去，滚到哪一条就高亮哪一类。搜索时分类条让位——那时用户在按词找，
+ * 不是在按类找，两套导航同时出现只会互相打架。
  *
  * 从 panel.js 摘出来（0.25.0）。摘的理由和段落区、模板编辑器一样：
  * 这一块的**开关状态**（`open`）以前混在面板的闭包里，于是"设置和问答互斥"
@@ -28,6 +34,7 @@
    * @param {object}   d
    * @param {Element}  d.el        浮层根 #ht-faq
    * @param {Element}  d.input     搜索框 #ht-fqinput
+   * @param {Element}  d.nav       分类条 #ht-fqnav
    * @param {Element}  d.list      结果列表 #ht-fqlist
    * @param {Element}  d.cnt       条数 #ht-fqcnt
    * @param {Element}  d.btn       标题栏那颗「?」 #ht-help
@@ -41,6 +48,7 @@
   HT.mountFaq = function (d) {
     const el = d.el;
     const input = d.input;
+    const nav = d.nav;
     const list = d.list;
     const cnt = d.cnt;
     const btn = d.btn;
@@ -62,31 +70,12 @@
     /**
      * 每条问答的元数据：条目自己写的优先，否则用所在分组的默认值。
      *
-     * 为什么要"组默认 + 条目覆盖"：77 条每条都手写一遍模块与版本，改一次模块名要改 77 处，
+     * 为什么要"组默认 + 条目覆盖"：五十余条每条都手写一遍模块与版本，改一次模块名要改五十处，
      * 必然漏。分组是同一件事的不同侧面，默认值天然一致；个别例外（版本不同、已失效）
      * 在条目上覆盖即可。
-     */
-    function metaOf(it, grp) {
-      const g = grp || {};
-      return {
-        mod: it.mod || g.mod || '',
-        ver: it.ver || g.ver || '',
-        upd: it.upd || g.upd || '',
-        rel: it.rel || g.rel || '',
-        st: it.st || '生效'
-      };
-    }
-
-    /**
-     * 元数据（归属模块 / 适用版本 / 更新日 / 关联 / 状态）**不显示**。
-     *
-     * 它原本贴在每条答案末尾，五个字段挤一行——那是给维护者对账用的，
-     * 使用者看到只会以为"这条答案还在草稿阶段"。真正要让人知道的
-     * 只有一件事：这条是不是已经失效了。那个用摘要上的 `.fq-tag` 表达，
-     * 不用展开也看得见。
-     *
-     * 字段本身留着：搜索仍按模块名匹配（搜「校验」能搜到整组），
-     * 只是不再占版面。
+     * 字段本身**不显示**：它回答的是"这条结论从哪一版起成立"，给维护者对账用。
+     * 使用者只需要知道一件事——这条是不是已经失效，那个用摘要上的 `.fq-tag` 表达。
+     * 搜索仍按模块名匹配（搜「校验」能搜到整组），只是不占版面。
      */
     function metaOf(it, grp) {
       const g = grp || {};
@@ -117,12 +106,13 @@
          前者讲这一栏怎么用，后者是每条判据在核什么。 */
       const out = [];
       (HT.FAQ || []).forEach(g => {
-        out.push({ g: g.g, mod: g.mod, ver: g.ver, upd: g.upd, rel: g.rel, items: g.items });
+        out.push({ g: g.g, intro: g.intro || '', mod: g.mod, ver: g.ver, upd: g.upd, rel: g.rel, items: g.items });
         if (g.key === 'checks') {
           const docs = checkEntries();
           if (docs.length) {
             out.push({
-              g: '校验项说明', mod: '自动核对', ver: g.ver, upd: g.upd, rel: '', items: docs
+              g: '校验项说明', intro: '每条判据在核什么、不成立意味着什么、该怎么处置。',
+              mod: '自动核对', ver: g.ver, upd: g.upd, rel: '', items: docs
             });
           }
         }
@@ -139,28 +129,46 @@
         mod: '已知缺陷', ver: k.ver, upd: k.upd, rel: '', st: k.st
       }));
       if (ki.length) {
-        out.push({ g: '已知问题（Known Issue）', mod: '已知缺陷', ver: '见各条',
+        out.push({ g: '已知问题', intro: '', mod: '已知缺陷', ver: '见各条',
           upd: '2026-11-15', rel: '', items: ki });
       }
       return out;
     }
 
+    /* 上一次画出来的分类，供滚动同步用（[{i, top}]）。不缓存 DOM 查询。 */
+    let heads = [];
+
+    /** 分类条：只在"按类浏览"时出现，搜索时收起 */
+    function drawNav(groups) {
+      if (!nav) return;
+      const q = String(input.value || '').trim();
+      if (q) { nav.innerHTML = ''; nav.hidden = true; return; }
+      nav.hidden = false;
+      nav.innerHTML = groups.map((grp, i) =>
+        '<button type="button" class="fq-chip" data-i="' + i + '">' + esc(grp.g) + '</button>').join('');
+    }
+
     function draw(kw, focusKey) {
       const q = String(kw || '').trim().toLowerCase();
       let total = 0;
-      const html = faqGroups().map(grp => {
+      let gi = 0;
+      const groups = faqGroups();
+      const html = groups.map(grp => {
         /* 组名也参与匹配：搜「口径」时整组留下。
            只匹配条目文本的话，最该看的那一组反而一条都搜不到——
-           用户按分类找东西，分类名本身必须能被搜到。 */
+           用户按分类找东西，分类名本身必须能被搜到。导语同理。 */
         const byGroup = !!q && grp.g.toLowerCase().indexOf(q) >= 0;
+        const byIntro = !!q && stripTags(grp.intro).toLowerCase().indexOf(q) >= 0;
         const items = byGroup ? grp.items : grp.items.filter(it => !q ||
           (it.q + ' ' + stripTags(it.a) + ' ' + (it.mod || grp.mod || ''))
             .toLowerCase().includes(q));
         if (!items.length) return '';
         total += items.length;
         /* 分类标题后面挂条数：清单长的时候，人先看"这一类有几条"再决定要不要翻 */
-        return '<div class="fq-g">' + esc(grp.g) +
-          '<i class="fq-gn">' + items.length + '</i></div>' + items.map(it => {
+        const intro = (grp.intro && (!q || byGroup || byIntro))
+          ? '<div class="fq-intro">' + grp.intro + '</div>' : '';
+        const body = '<div class="fq-g" data-i="' + gi + '">' + esc(grp.g) +
+          '<i class="fq-gn">' + items.length + '</i></div>' + intro + items.map(it => {
             const m = metaOf(it, grp);
             const isOpen = focusKey && it.key === focusKey ? ' open' : '';
             const k = it.key ? ' data-key="' + esc(it.key) + '"' : '';
@@ -173,9 +181,33 @@
             return '<details class="fq"' + k + attr + isOpen + '><summary>' + esc(it.q) + tag + '</summary>' +
               '<div class="fq-a">' + it.a + '</div></details>';
           }).join('');
+        gi++;
+        return body;
       }).join('');
       list.innerHTML = html || '<div class="fq-none">没有匹配的问题，换个词试试</div>';
       cnt.textContent = q ? total + ' 条' : '共 ' + total + ' 条';
+      /* 分类条上的条数是"这一类一共几条"，与筛选后的条数不是一回事，
+         所以分类条只在未搜索时画——那时两者才相等。 */
+      drawNav(groups);
+      collectHeads();
+    }
+
+    /** 记下每个分类标题在列表里的位置，供「点分类跳过去」与「滚到哪高亮哪」用 */
+    function collectHeads() {
+      heads = [];
+      const gs = list.querySelectorAll('.fq-g');
+      for (let i = 0; i < gs.length; i++) heads.push({ i: +gs[i].dataset.i, top: gs[i].offsetTop });
+      syncActive();
+    }
+
+    /** 高亮当前所在分类：取最后一个"标题已在视口顶部或之上"的分类 */
+    function syncActive() {
+      if (!nav || nav.hidden || !heads.length) return;
+      const y = list.scrollTop + 12;
+      let cur = heads[0].i;
+      for (const h of heads) if (h.top <= y) cur = h.i;
+      const btns = nav.querySelectorAll('.fq-chip');
+      for (const b of btns) b.classList.toggle('on', +b.dataset.i === cur);
     }
 
     /**
@@ -203,6 +235,7 @@
            多减 30px 是给分组标题让位——它是 sticky 的，会盖住滚到最上面的那一行，
            正好把要看的那个问题压住。 */
         list.scrollTop = Math.max(0, hit.offsetTop - 30);
+        syncActive();
       } else {
         try { input.focus({ preventScroll: true }); } catch (e) { }
       }
@@ -222,14 +255,28 @@
     const toggle = () => (open ? close() : openFaq(''));
 
     /* ── 事件 ─────────────────────────────────────────────────
-       绑在自己的三处：标题栏那颗「?」、浮层里的「返回」、搜索框。
-       以前这四行散在面板的事件区里，和设置、生成、导出混在一段。 */
+       绑在自己的三处：标题栏那颗「?」、浮层里的「返回」、搜索框、分类条。
+       以前这几行散在面板的事件区里，和设置、生成、导出混在一段。 */
     btn.addEventListener('click', () => { if (!throttled('faq', 200)) toggle(); });
     d.back.addEventListener('click', () => close(true));
-    input.addEventListener('input', () => draw(input.value));
+    input.addEventListener('input', () => { draw(input.value); list.scrollTop = 0; });
     btn.addEventListener('keydown', e => {
       if (e.key === 'ArrowDown' && open) { e.preventDefault(); input.focus(); }
     });
+
+    if (nav) {
+      nav.addEventListener('click', e => {
+        const b = e.target.closest ? e.target.closest('.fq-chip') : null;
+        if (!b) return;
+        /* 点分类只挪列表，不改筛选：分类条是目录，不是第二个搜索 */
+        const g = list.querySelector('.fq-g[data-i="' + b.dataset.i + '"]');
+        if (g) list.scrollTop = Math.max(0, g.offsetTop);
+        syncActive();
+      });
+      /* 滚动时高亮跟随。用节流而不是逐帧：这条只改几个 class，
+         节流到 100ms 已经看不出延迟，却省掉滚动过程中每帧一次布局读取。 */
+      list.addEventListener('scroll', () => { if (!throttled('fqnav', 100)) syncActive(); }, { passive: true });
+    }
 
     return { open: openFaq, close, toggle, isOpen: () => open };
   };

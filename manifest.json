@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "简报助手",
   "short_name": "简报助手",
-  "version": "1.10.5",
+  "version": "1.10.6",
   "description": "在业务页面上按模板整理可视化数据并生成为文字稿：自由文本模板、按需取数、多项交叉校验、精确到秒的时间基准、一键导出 txt。",
   "author": "FARS-Assistant",
   "minimum_chrome_version": "111",

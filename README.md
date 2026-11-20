@@ -4,7 +4,7 @@
 
 **浏览器辅助工具：从业务页面整理可视化数据，按模板成文、逐项校验**
 
-[![version](https://img.shields.io/badge/version-1.10.5-2f6fed?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.10.6-2f6fed?style=flat-square)](CHANGELOG.md)
 [![manifest](https://img.shields.io/badge/manifest-v3-34a853?style=flat-square)](manifest.json)
 [![chrome](https://img.shields.io/badge/Chrome-111%2B-4285f4?style=flat-square&logo=googlechrome&logoColor=white)](https://www.google.com/chrome/)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
@@ -46,7 +46,7 @@ Chrome / Edge 扩展（Manifest V3）· 零构建 · 零依赖 · 不经过第�
 | **时间基准可调** | 默认每日固定时刻结算、精确到秒；点面板顶部那一行即可改为任意时刻 |
 | **同比自动计算** | 按去年同窗口实查；特定年份可走内置月度表，分母可溯源 |
 | **复制 / 导出** | 纯文本或 txt 两种出口；校验未通过时两条出口均留痕 |
-| **说明内置** | 面板内可查 62 条问答、23 项校验说明、5 条已知问题，按关键词检索 |
+| **说明内置** | 面板内可查 51 条问答、23 项校验说明、5 条已知问题，按分类浏览或关键词检索 |
 | **配置共享** | 所有安装本扩展的浏览器共用一份配置：改完自动上传、打开页面自动取回，无同步码 |
 | **出错留痕** | 记录稳定短码、模块名与版本，减少口述成本 |
 
@@ -180,8 +180,8 @@ Chrome / Edge 扩展（Manifest V3）· 零构建 · 零依赖 · 不经过第�
 ## 版本规范
 
 遵循[语义化版本](https://semver.org/lang/zh-CN/)，格式为 `主版本.次版本.修订号`。
-Git tag 与发布标题写作 `v1.10.5`，其中 `v` 仅为标签前缀，不属于版本号；
-`manifest.json` 内始终为裸版本号 `1.10.5`。
+Git tag 与发布标题写作 `v1.10.6`，其中 `v` 仅为标签前缀，不属于版本号；
+`manifest.json` 内始终为裸版本号 `1.10.6`。
 
 规范要求「先定义公共 API」。本扩展的对外接口只有四项：
 

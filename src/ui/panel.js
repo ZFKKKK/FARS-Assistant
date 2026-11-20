@@ -105,6 +105,7 @@
             <input id="ht-fqinput" type="search" spellcheck="false"
                    placeholder="搜：截点  成灾  待核  专注" aria-label="搜索问题">
           </div>
+          <div class="fq-nav" id="ht-fqnav" role="group" aria-label="问题分类"></div>
           <div class="fq-list" id="ht-fqlist"></div>
         </div>
         <div class="ht-set" id="ht-set" hidden>
@@ -140,7 +141,7 @@
        而不是让整个扩展一起白。 */
     const NEED = ['ht-panel', 'ht-ver', 'ht-range', 'ht-hline', 'ht-bar', 'ht-out',
       'ht-cksec', 'ht-cktog', 'ht-checks', 'ht-ckrt', 'ht-hint', 'ht-st', 'ht-stb', 'ht-sts',
-      'ht-gen', 'ht-copy', 'ht-exp', 'ht-faq', 'ht-fqinput', 'ht-fqlist', 'ht-fqcnt',
+      'ht-gen', 'ht-copy', 'ht-exp', 'ht-faq', 'ht-fqinput', 'ht-fqnav', 'ht-fqlist', 'ht-fqcnt',
       'ht-help', 'ht-set', 'ht-setview', 'ht-cfg', 'ht-close'];
     const miss = NEED.filter(id => !$(id));
     if (miss.length) throw new Error('面板缺少节点：' + miss.join('、'));
@@ -167,6 +168,7 @@
     /* 口径与常见问题 */
     const faqEl = $('ht-faq');
     const fqInput = $('ht-fqinput');
+    const fqNav = $('ht-fqnav');
     const fqList = $('ht-fqlist');
     const fqCnt = $('ht-fqcnt');
     const btnHelp = $('ht-help');
@@ -597,6 +599,7 @@
     F = HT.mountFaq({
       el: faqEl,
       input: fqInput,
+      nav: fqNav,
       list: fqList,
       cnt: fqCnt,
       btn: btnHelp,
