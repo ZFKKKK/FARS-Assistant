@@ -566,8 +566,9 @@
         : '最近一次未送达（' + when + '）';
     }
 
-    /* 登录票据剩多久。只报事实：站点发的是 30 分钟的 JWT，签发即定死，
-       扩展这边没有换票的入口——在设置页摆一颗"续期"按钮是骗人的。
+    /* 登录票据。只报事实：票面时间记的是签发那一刻，实测与能否取数无关
+       （过期几小时照样取数，第二天首次打开才要重登），所以不打倒计时，
+       扩展这边也没有换票的入口——摆一颗"续期"按钮是骗人的。
        独立设置页（options.html）跑在扩展自己的 origin 上，读不到站点的
        localStorage：那一档直说"需在站点页面查看"，不要假装"未登录"。 */
     function paintSess() {
@@ -581,20 +582,12 @@
       try { li = HT.loginInfo(); } catch (e) { }
       if (!li) { el.textContent = '无法读取'; return; }
       if (!li.hasToken) { el.textContent = '未登录'; return; }
-      if (li.unknown) { el.textContent = '已登录'; el.title = '票据里没有到期时间'; return; }
-      if (li.expired) {
-        /* 票面时间过了不等于不能用——服务端不按它逐秒拦人（出稿人实测站点仍能查数）。
-           这里只陈述事实，不下"必须重新登录"的结论。 */
-        el.textContent = '票面已到期';
-        el.title = '票面 ' + new Date(li.exp).toLocaleString()
-          + ' 已过；服务端不一定按它拦人，真被拒时面板会提示重新登录';
-        return;
-      }
-      const m = Math.ceil(li.leftMs / 60000);
-      el.textContent = m >= 60
-        ? '剩 ' + Math.floor(m / 60) + ' 小时 ' + (m % 60) + ' 分钟'
-        : '剩 ' + m + ' 分钟';
-      el.title = '到期 ' + new Date(li.exp).toLocaleTimeString();
+      /* 只答"页面里有没有票"。票面时间照实写在悬停里，但不做倒计时：
+         票面 30 分钟只记签发那一刻，实测过期几小时仍能取数，倒计时会误导。 */
+      el.textContent = '已登录';
+      if (li.unknown) { el.title = '票据里没有可读的时间字段'; return; }
+      el.title = '票面 ' + new Date(li.exp).toLocaleString()
+        + '（只记签发那一刻，与能否取数无关）';
     }
 
     /* ── 事件 ─────────────────────────────────────────────

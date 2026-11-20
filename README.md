@@ -4,7 +4,7 @@
 
 **浏览器辅助工具：从业务页面整理可视化数据，按模板成文、逐项校验**
 
-[![version](https://img.shields.io/badge/version-1.10.6-2f6fed?style=flat-square)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.10.7-2f6fed?style=flat-square)](CHANGELOG.md)
 [![manifest](https://img.shields.io/badge/manifest-v3-34a853?style=flat-square)](manifest.json)
 [![chrome](https://img.shields.io/badge/Chrome-111%2B-4285f4?style=flat-square&logo=googlechrome&logoColor=white)](https://www.google.com/chrome/)
 [![license](https://img.shields.io/badge/license-MIT-lightgrey?style=flat-square)](LICENSE)
@@ -180,8 +180,8 @@ Chrome / Edge 扩展（Manifest V3）· 零构建 · 零依赖 · 不经过第�
 ## 版本规范
 
 遵循[语义化版本](https://semver.org/lang/zh-CN/)，格式为 `主版本.次版本.修订号`。
-Git tag 与发布标题写作 `v1.10.6`，其中 `v` 仅为标签前缀，不属于版本号；
-`manifest.json` 内始终为裸版本号 `1.10.6`。
+Git tag 与发布标题写作 `v1.10.7`，其中 `v` 仅为标签前缀，不属于版本号；
+`manifest.json` 内始终为裸版本号 `1.10.7`。
 
 规范要求「先定义公共 API」。本扩展的对外接口只有四项：
 

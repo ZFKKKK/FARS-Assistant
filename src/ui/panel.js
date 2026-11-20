@@ -220,8 +220,8 @@
       stEl.className = 'st' + (tone ? ' ' + tone : '');
       footTip = tip || label || '';
       stEl.title = footTip;
-      /* 状态字一换，后面的小尾巴（票据剩几分钟 / 能不能点）也要跟着重算：
-         从「已就绪」翻到「请登录」时，尾巴若还挂着上一条的「剩 4 分」，两句话打架。 */
+      /* 状态字一换，后面的小尾巴（未同步 / 能不能点）也要跟着重算：
+         从「已就绪」翻到「请登录」时，尾巴若还挂着上一条的「未同步」，两句话打架。 */
       paintSess();
     }
 
@@ -677,22 +677,27 @@
 
     /* ── 票据寿命 ───────────────────────────────────────────────
        站点发给浏览器的是一张 JWT（字段只有 sub / exp / userid / iat），
-       签发那一刻写下 30 分钟；localStorage 里只有 `token` 一把，没有 refresh_token，
-       接口也没有"拿旧票换新票"的入口 —— 所谓"保活"在前端做不成。
+       签发那一刻写下 30 分钟。这个数只记"什么时候签的"，**不是登录有效期**。
 
-       但**票面时间不等于能不能用**：请求同时带同源 Cookie，exp 过了照样能查数
-       （出稿人实测："我在站点上明明还能查数据，扩展却显示已过期"）。
-       所以这里只做两件事，都不拦人：
+       2026-11-21 重新实测（抓包 + 站点业务包 + 八天诊断日志）：
 
-         1. 剩不到五分钟时，在标题栏状态字后面挂三个字（「剩 4 分」）——
-            提前说一声，免得取数跑到一半断；
-         2. 真的被拒（401/403，或响应根本不是 JSON）之后，状态字转「请登录」、
-            整块状态可点，点了开一个新标签去登录，原标签一个字不动，
-            登录完这一轮自己接着跑（pendingRun）。
+         · 同一张票，票面过期 42 分钟后打了 16 个请求，全部 200；
+         · 11-15 从 00:36 到 18:14 成功出稿 25 次，01:54 做完、08:16 隔夜
+           再开还是成功，当天没有一次被送到登录页；
+         · 站点自己也不续签：业务包里只有登录成功那一处写 token，别处只读；
+           存下的 refreshToken 全站没有一处读它；
+         · 真要重登，是第二天首次打开被重定向到 /login。
 
-       **不在 exp 到期时写「已过期」**：上一版那一行把人支去白登了一次。
+       所以登录没有可预测的到期时刻，票面时间与能不能取数无关。这里因此不做
+       倒计时——上一版「剩 4 分」提醒的是个不影响使用的时刻，只会把人支去白跑。
+       只有两种情况出字：
+
+         1. 页面里读不到票，或取数真被拒（401/403、响应不是 JSON）——
+            状态字转「请登录」，整块状态可点，点了开新标签去登录，
+            原标签一个字不动，登录完这一轮自己接着跑（pendingRun）；
+         2. 云端配置从没同步成功——那是另一件事，排在票据之后。
+
        也不在入口上加红点/角标——入口是站点导航的克隆体，多一个点就不像原生的。 */
-    const SESS_WARN = 5 * 60 * 1000;    // 剩 5 分钟起提醒
     const SESS_POLL = 1500;             // 等登录时多久看一眼存储
     const SESS_WATCH = 15 * 60 * 1000;  // 最多等这么久，然后收手
     let sessTimer = null;
@@ -708,18 +713,14 @@
     const sessLife = () => {
       try { return HT.loginInfo(); } catch (e) { return null; }
     };
-    const clockOf = ms => {
-      const d = new Date(ms);
-      return pad(d.getHours()) + ':' + pad(d.getMinutes());
-    };
-
     /**
      * 重画状态字后面的小尾巴，以及状态本身可不可点。
      *
      * 只有两种情况会多写字：
-     *   · 票还剩不到五分钟 → 「剩 4 分」（琥珀）
+     *   · 云端配置没同步成功 → 「未同步」（陈述，不可点）
      *   · 确实没票 / 票被拒  → 不写字，改成整块状态可点（悬停有说明）
-     * 其余时候这个位置是空的，标题栏宽度一点不变。
+     * 其余时候这个位置是空的，标题栏宽度一点不变。票面时间不在这里显示——
+     * 它只记签发那一刻，与能不能取数无关。
      *
      * 不重建整块 DOM：showMeta() 是整块重写 innerHTML，而它会被轮询调到，
      * 拿它来刷倒计时等于把人正在操作的东西每半分钟抹一次。
@@ -737,17 +738,6 @@
         stEl.title = noTicket
           ? '这个页面里读不到站点票据，点这里去登录'
           : '票据被拒（凭证已失效），点这里去登录';
-        return;
-      }
-
-      const soon = !li.unknown && li.leftMs > 0 && li.leftMs <= SESS_WARN;
-      if (soon) {
-        const m = Math.max(1, Math.ceil(li.leftMs / 60000));
-        stSess.hidden = false;
-        stSess.textContent = '剩 ' + m + ' 分';
-        stEl.classList.add('is-act');
-        stEl.title = '票据 ' + clockOf(li.exp) + ' 到期。到期后照样能取数，'
-          + '真被拒了状态会变成「请登录」，点一下就能去登';
         return;
       }
 
@@ -819,7 +809,7 @@
       HT.clearCache();
       authDead = false;
       const li = sessLife();
-      hint('已恢复登录' + (li && li.exp ? '（票面到 ' + clockOf(li.exp) + '）' : ''), btnGen);
+      hint('已恢复登录', btnGen);
       paintSess();
       probeLogin();
       /* 人点过生成、被一句"凭证被拒"打断：登录回来就该接着跑，
@@ -911,10 +901,8 @@
 
     /* 打开期间每秒走一次，只为在跨过截点那一刻把「未到点」翻成「已就绪」。
        不重建 DOM（那会让入场动画每秒重放），只比一次时间。
-       顺带每 20 秒重画一次票据小尾巴——「剩 4 分」要在变「剩 3 分」时跟着走，
-       每秒重画没有意义（分钟级的数），只是白读写一次存储。 */
+       票据小尾巴不跟着走——它说的是状态变化，不是分钟的流逝。 */
     let tickTimer = null;
-    let sessTick = 0;
     function startTick() {
       if (tickTimer) return;
       tickTimer = setInterval(() => {
@@ -922,7 +910,6 @@
         let passed = false;
         try { passed = HT.anchorStatus(new Date(), cfg || {}).passed; } catch (e) { }
         if (passed && state === 'pending') refreshAnchor();
-        if (++sessTick % 20 === 0) paintSess();
       }, 1000);
     }
     function stopTick() { clearInterval(tickTimer); tickTimer = null; }
