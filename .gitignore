@@ -1,0 +1,30 @@
+# 生成物：预览页、量版页、成品目录、安装包都是可重建的
+debug/preview.html
+debug/_probe.html
+debug/_panel.html
+debug/_*.jpg
+debug/_*.png
+dist/
+release/*.zip
+release/version.json
+
+# 本机配置：两个构建期地址的真值写在这里，不入库
+ops/
+
+# 报文与日志：含 token 头与 Cookie，或含设备短码
+_har/
+*.har
+*.log
+_diag/
+
+# 开发环境杂物
+node_modules/
+.vscode/
+.idea/
+.env
+.env.*
+*.tmp
+*.bak
+coverage/
+.DS_Store
+Thumbs.db

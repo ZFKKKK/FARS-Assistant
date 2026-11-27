@@ -1,0 +1,3438 @@
+/* panel.css —— 文稿助手 · 页面内面板
+ *
+ * @file      panel.css
+ * @version   见 src/data/release.js（此处不再写具体号，写了就会过期）
+ * @license   MIT
+ *
+ * 样式注入在 Shadow Root 内（nav.js 的 entry 段负责挂载），
+ * 因此这里可以放心用 :host 与 ID，不必担心宿主页面同名类冲突。
+ *
+ * ── 设计令牌 ─────────────────────────────────────────────────
+ * 一条硬规矩：颜色、间距、圆角、字号，**只能从下面的令牌里取**。
+ * 这个文件里不再出现第二个色值，也不再出现刻度外的 px。
+ * 自检脚本 有一条断言在扫全文，刻度外的值会直接判失败。
+ *
+ * 色   一个品牌色（蓝 600）向外生成 50–900 十档；中性色取 slate 0–900；
+ *      成功 / 警示 / 危险各取 700 做文字、500 做条与灯、50 做底。
+ *      组件只写语义名（--ht-ac / --ht-ink-2 / --ht-bg-1），不写色号。
+ * 间距 4 8 16 24 32 48 64 96，八档成倍递进。
+ *      另有一个 2px，叫 --ht-nudge——它是**光学微调**不是间距，
+ *      只用来挪 1–2px 对齐（描边落点、图标光心、细分隔线），不参与布局。
+ *      名字特意不叫 s0，免得被当成第 0 档间距拿去铺版面。
+ * 圆角 4 8 12 999。只有四档，没有 16 与 24 以上：
+ *      圆角上限受控件高度约束——34px 高的输入框用 16 会把两端吃掉。
+ *      嵌套时子级降一档：父 8 → 子 4。
+ * 字   6 档字号 × 3 档字重 × 4 档字距 × 3 档行高 + 1 条行宽。
+ *      层级靠这五件事叠加，不靠颜色深浅——颜色只分主次，不分层级。
+ *
+ * ── 动效令牌 ─────────────────────────────────────────────────
+ *   两条手写曲线管"状态切换"，两条采样曲线管"有物理性格的动作"。
+ *
+ *   --ht-e-out      cubic-bezier(.215,.61,.355,1)  进入（easeOutCubic）
+ *   --ht-e-in       cubic-bezier(.4,0,1,1)         退出，比进入更短
+ *   --ht-e-drag     linear(…)                      拖拽吸附：1200/80 过阻尼
+ *   --ht-e-tick     linear(…)                      对勾 / 回执：380/18 欠阻尼
+ *
+ *   为什么后两条不用 cubic-bezier：贝塞尔能"看起来像"弹，但它只有两个控制点，
+ *   表达不出"冲过头再回落一次"的阻尼振荡。linear() 是逐点采样，弹簧方程算出来
+ *   是什么样就写成什么样——Chrome 113+ 支持，本项目是 Chrome 扩展，没有兼容负担。
+ *   采样点由 弹簧采样脚本 用半隐式欧拉积分生成，改参数重跑即可，别手调数字。
+ *
+ *   时长  90 按压 / 130 退出 / 200 进入 / 280 内容 / 340 吸附 / 520 回执
+ *   系统开启「减弱动态效果」时全部退化为直接切换
+ */
+
+:host {
+  all: initial;
+  position: fixed;
+  inset: 0;
+  z-index: 2147483645;
+  pointer-events: none;
+  color-scheme: light;
+}
+
+/* ── 设计令牌 ─────────────────────────────────────────── */
+/* 挂在 #ht-panel 与 :root 两处：
+   前者是影子树里的面板，后者是独立设置页 options.html——
+   那一页没有 #ht-panel，令牌若只写在面板上，那边的输入框就没有底色、
+   开关只剩一颗白点，"框都没了"就是这么来的。
+   影子树里 :root 不匹配（影子根没有根元素），所以这一条对面板没有副作用。 */
+#ht-panel,
+:root {
+  /* ── 色 · 品牌阶 ──────────────────────────────────────
+     一个品牌色，向外扩成十档。换品牌只改 500–700 这三行和 --ht-brand-rgb，
+     下面所有语义名都是引用，文件里没有第二处色号。 */
+  --ht-brand-50: #EFF5FF;
+  --ht-brand-100: #DBE8FE;
+  --ht-brand-200: #BFD7FE;
+  --ht-brand-300: #93BBFD;
+  --ht-brand-400: #609AFA;
+  --ht-brand-500: #3B82F6;
+  --ht-brand-600: #2563EB;
+  --ht-brand-700: #1D4ED8;
+  --ht-brand-800: #1E40AF;
+  --ht-brand-900: #1E3A8A;
+  /* 半透明变体统一走通道：rgb(var(--ht-brand-rgb) / .45)。
+     焦点环、拖拽描边、输入框光晕一共十来处 rgba(37,99,235,·)，
+     写成通道变量才不会在换色时留在旧色上——"那圈光还是蓝的"就是这么漏的。 */
+  --ht-brand-rgb: 37 99 235;
+
+  /* ── 色 · 中性阶 ──────────────────────────────────────
+     暖灰（R≥G≥B，差 1–3 档），不是冷蓝灰。三件事一次到位：
+       ① 底色 #FCFCFB、层 #F6F6F4，相邻层 RGB 只差 6–7（2.4%–2.7%）。
+          分层的活全交给这点明度差，组件上不再画 1px 边框。
+       ② 最深只到 #171715，不是纯黑。纯黑压在暖白上会显脏，也没有"纸"的质感。
+       ③ 四档墨色对比度 17.5 / 10.3 / 7.3 / 5.0，对应标题 / 正文 / 次要 / 微标；
+          微标 5.0 是刻意留的余量——它落在 bg-1 上仍有 4.76，过 AA。
+     （验证脚本在 自检脚本；改色阶后用 WCAG 公式复核这四档，别凭眼睛。） */
+  --ht-gray-0: #FCFCFB;
+  --ht-gray-50: #F6F6F4;
+  --ht-gray-100: #F0F0ED;
+  --ht-gray-200: #E9E9E5;
+  --ht-gray-300: #DCDCD6;
+  --ht-gray-400: #AEAEA5;
+  --ht-gray-500: #6E6E64;
+  --ht-gray-600: #55554D;
+  --ht-gray-700: #3F3F38;
+  --ht-gray-800: #262623;
+  --ht-gray-900: #171715;
+  --ht-gray-rgb: 23 23 21;
+
+  --ht-ink-1: var(--ht-gray-900);
+  --ht-ink-2: var(--ht-gray-700);
+  --ht-ink-3: var(--ht-gray-600);
+  --ht-ink-4: var(--ht-gray-500);
+  --ht-bg-0: var(--ht-gray-0);
+  --ht-bg-1: var(--ht-gray-50);
+  --ht-bg-2: var(--ht-gray-100);
+  --ht-bg-3: var(--ht-gray-200);
+  --ht-line: var(--ht-gray-200);
+
+  /* ── 色 · 功能三色 ────────────────────────────────────
+     每个颜色三档：700 给文字（浅底上仍过 4.5:1）、500 给进度条与天线灯
+     （要亮）、50 给整块浅底。下面 --ht-ok / --ht-wa / --ht-ba 是语义名，
+     组件只认这三个，不认色阶。 */
+  --ht-ok-50: #EEFAF2;
+  --ht-ok-500: #10B981;
+  --ht-ok-700: #047857;
+  --ht-wa-50: #FCF8EC;
+  --ht-wa-500: #D97706;
+  --ht-wa-700: #B45309;
+  --ht-wa-900: #78350F;
+  --ht-ba-50: #FBF1EF;
+  --ht-ba-500: #EF4444;
+  --ht-ba-700: #B91C1C;
+  --ht-ba-900: #7F1D1D;
+  /* 三条通道给 rgb(var(...) / α) 用：品牌色的半透明、投影、1px 描边。
+     line-rgb 取中性阶 400（#AEAEA5）：描边只做"极淡的分隔"，不参与分层。 */
+  --ht-line-rgb: 174 174 165;
+  --ht-white-rgb: 255 255 255;
+
+  --ht-ac: var(--ht-brand-600);
+  --ht-ac-d: var(--ht-brand-700);
+  --ht-ac-w: var(--ht-brand-50);
+  --ht-ac-w2: var(--ht-brand-100);
+  --ht-ac-l: var(--ht-brand-300);
+  /* 正文里的日期与时段（「11月12日18时」「11月11日18时至…」）。
+     刻意不用强调色：强调色留给要核对的数字。要换只改这一行。 */
+  --ht-date: var(--ht-gray-500);
+  --ht-ok: var(--ht-ok-700);
+  --ht-ok-b: var(--ht-ok-500);
+  --ht-ok-w: var(--ht-ok-50);
+  --ht-wa: var(--ht-wa-700);
+  --ht-wa-b: var(--ht-wa-500);
+  --ht-wa-w: var(--ht-wa-50);
+  --ht-ba: var(--ht-ba-700);
+  --ht-ba-b: var(--ht-ba-500);
+  --ht-ba-w: var(--ht-ba-50);
+
+  /* 中文优先走现代无衬线，西文跟着中文那族走。
+     为什么不是先 Segoe：这一屏里中文才是主力，西文若单独命中 Segoe，
+     同一行里"每日记录数据 12 条"会出现两种骨架（西文窄高、中文方），
+     眼睛会把它们读成两种字号。Noto Sans SC 的拉丁部分与其中文同族，
+     中英数字混排是一套字。
+
+     HT Sans 是**随扩展走的那一份**：Noto Sans SC 按界面用字裁出的子集
+     （fonts/ht-sans.woff2，约 290KB，由 debug/build_font.js 生成），
+     在 src/ui/dom.js 里用 FontFace 注册。有它，每台机器的界面长得一样，
+     550 / 650 也才是真字重；下面那串是"万一没加载到"的退路，同时也接管
+     界面上没出现过的字（使用者手打的、站名里的生僻字）——逐字回退，
+     不是缺字方块。
+     顺序：HT Sans → 思源系（Noto / Source Han）→ 苹果与国产系统（苹方 /
+     鸿蒙 / MiSans）→ 等线 → 雅黑兜底。雅黑只有 400 / 700 两档，
+     550 会吸附或合成——这是原先"层级看着含混"的根。 */
+  --ht-font: "HT Sans", "Noto Sans SC", "Source Han Sans SC", "PingFang SC",
+    "HarmonyOS Sans SC", "MiSans", "Segoe UI Variable Text", "Segoe UI",
+    "DengXian", "Microsoft YaHei UI", "Microsoft YaHei", sans-serif;
+  --ht-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+
+  --ht-e-out: cubic-bezier(.215, .61, .355, 1);
+  --ht-e-in: cubic-bezier(.4, 0, 1, 1);
+  /* 拖拽吸附：k=1200 c=80（ζ=1.155 过阻尼，零回弹）。末段贴着 1 走完，
+     到位那一下是"咬死"的，不弹、不抖。行程 340ms——比它更短会觉得拖完
+     "啪"地跳过去，更长会觉得松手后还飘。 */
+  --ht-e-drag: linear(0, 0.101 4.6%, 0.276 9.1%, 0.443 13.7%, 0.581 18.2%, 0.688 22.8%, 0.769 27.4%,
+      0.830 31.9%, 0.875 36.5%, 0.908 41.0%, 0.932 45.6%, 0.950 50.0%, 0.963 54.6%, 0.973 59.1%,
+      0.980 63.7%, 0.985 68.2%, 0.989 72.8%, 0.992 77.4%, 0.994 81.9%, 0.996 86.5%, 0.997 91.0%,
+      0.998 95.6%, 0.999 100%);
+  /* 回执对勾：k=380 c=18（ζ=0.462 欠阻尼，峰值 +19.4% 在 34.6%，之后回落一次到 -3.8%）。
+     只给 40px 以内的小元素用（对勾、状态点），放大到卡片上就成了"弹跳"。 */
+  --ht-e-tick: linear(0, 0.068 3.8%, 0.233 7.7%, 0.445 11.5%, 0.662 15.4%, 0.857 19.2%, 1.011 23.1%,
+      1.116 26.9%, 1.175 30.8%, 1.194 34.6%, 1.183 38.5%, 1.152 42.3%, 1.111 46.2%, 1.069 50.0%,
+      1.030 53.8%, 1.000 57.7%, 0.979 61.5%, 0.966 65.4%, 0.962 69.2%, 0.964 73.1%, 0.970 76.9%,
+      0.978 80.8%, 0.986 84.6%, 0.994 88.5%, 1.000 92.3%, 1.004 96.2%, 1.006 100%);
+  --ht-d-press: 90ms;
+  --ht-d-exit: 130ms;
+  /* 控件本体的即时反馈：开关滑块平移、箭头翻转、行高与字号变化。
+     比 exit 长一档——130 用在"东西消失"，滑块这 16px 的位移用它收得太急；
+     又不到 enter 的 200，那已经能看出"在动"而不是"动了"。 */
+  --ht-d-tap: 160ms;
+  --ht-d-enter: 200ms;
+  --ht-d-content: 280ms;
+  --ht-d-snap: 340ms;
+  --ht-d-tick: 520ms;
+  /* 查询中的转圈一圈用时。取 900 而不是 1s：取数动辄十几秒，
+     一整秒一圈看着"卡"，快半档才像在干活；再快（600 以下）就成了痉挛。 */
+  --ht-d-spin: 900ms;
+
+  /* 阴影一律从中性阶最深的那个通道派生：换中性色，投影也跟着走，
+     不会出现"底子改了、投影还是旧墨蓝"的脏色。 */
+  --ht-e1: 0 1px 2px rgb(var(--ht-gray-rgb) / .06), 0 1px 1px rgb(var(--ht-gray-rgb) / .04);
+  --ht-e2: 0 1px 2px rgb(var(--ht-gray-rgb) / .05), 0 8px 20px -8px rgb(var(--ht-gray-rgb) / .2);
+  --ht-e3: 0 1px 2px rgb(var(--ht-gray-rgb) / .04), 0 24px 56px -20px rgb(var(--ht-gray-rgb) / .34);
+
+  /* ── 间距 ─────────────────────────────────────────────
+     八档，全是 4 的倍数，相邻至少差一倍——不给自己留"12px 好像也行"的位置。
+     版面段落用 s2 起步、块与块用 s3、区块之间用 s4，再大就是留白页了。 */
+  --ht-s1: 4px;
+  --ht-s2: 8px;
+  --ht-s3: 16px;
+  --ht-s4: 24px;
+  --ht-s5: 32px;
+  --ht-s6: 48px;
+  --ht-s7: 64px;
+  --ht-s8: 96px;
+  /* 2px 是光学微调，不是间距：只用来挪描边落点、图标光心、细分隔线。
+     名字不叫 s0，免得有人拿它当"第 0 档间距"去铺版面。 */
+  --ht-nudge: 2px;
+
+  /* ── 圆角 ─────────────────────────────────────────────
+     四档，比间距少一半——圆角上限受控件高度约束：
+     34px 高的输入框用 16 会把两端吃掉，24 以上只能给大浮层，这里用不着。
+     嵌套降一档：父 8 里的方块用 4。
+     胶囊写 999 而不是"高度的一半"：开关原来写 10px，高度一改就从胶囊变方角。 */
+  --ht-r-xs: 4px;
+  --ht-r-sm: 8px;
+  --ht-r-md: 12px;
+  --ht-r-pill: 999px;
+
+  /* ── 界面手感（1.12.16）────────────────────────────────
+     五颗控件的默认几何。真值在 cfg.ui（见 config.js 的 UI_PARAMS），
+     uikit.js 的 applyUi / applyNav 会把这些变量覆盖到面板与设置页上；
+     这里写的是"JS 还没跑"那一瞬的兜底，数值与新装的默认值一致。
+     为什么不把默认值只写在这里：它们是**用户可改的**，写两处就会漂。 */
+  --ui-menu-r: 10px;
+  --ui-menu-w: 200px;
+  --ui-menu-row: 40px;
+  --ui-menu-glide: 170ms;
+  --ui-menu-pop: 180ms;
+  /* 收起取展开的 2/3（参考实现同一个算式）：关掉比打开"急"一档，
+     否则点空白处收菜单会显得迟钝。 */
+  --ui-menu-pop-out: 120ms;
+  --ui-seg-h: 24px;
+  --ui-seg-r: 8px;
+  --ui-seg-in: 2px;
+  --ui-seg-pad: 10px;
+  --ui-seg-stretch: 100;
+  --ui-seg-squash: 3px;
+  --ui-seg-speed: 1;
+  --ui-mark-size: 18px;
+  --ui-mark-sw: 2;
+  --ui-mark-spin: 1100ms;
+  --ui-mark-draw: 240ms;
+  /* 对勾的起笔延迟：等环合拢成整圈之后再画，两件事同时开始会看不清先后 */
+  --mk-check-delay: 120ms;
+  --stn-row: 30px;
+  --stn-trunk: 12px;
+  --stn-r: 8px;
+  --stn-lw: 1.5px;
+  --stn-fs: 12px;
+  --stn-draw: 400ms;
+  --stn-fold: 300ms;
+  /* 分类树的三层颜色不是"三种灰"，是同一支墨色按浓度排：
+     行文是 muted(60%)，悬停与展开的分组回到满墨，选中的那一项取强调色。
+     参考实现是暗底（f5f5f5 / 55%），换到暖白底上必须把浓度提一档，
+     否则 12px 的字在 #FCFCFB 上掉到 4.0 以下。 */
+  --stn-ink: var(--ht-ink-1);
+  --stn-muted: color-mix(in srgb, var(--ht-ink-1) 62%, transparent);
+  --stn-line: var(--ht-line);
+  --stn-ac: var(--ht-ac);
+  --stn-ac-d: var(--ht-ac-d);
+  --hold-r: 7px;
+  --hold-scale: .965;
+  --hold-wave: 5px;
+  --hold-w: 0px;
+  --hold-h: 0px;
+  --hold-cycles: 1.2;
+  --hold-p: 0;
+  --hold-release: 180ms;
+  --hold-hold: 1300ms;
+  --hold-reset: 1200ms;
+  /* 长按按钮两层的颜色：底（未按）与液面（按住时推满）。
+     液面取危险色的**实色**而不是浅底——参考实现就是"实色推满 + 反白字"，
+     浅底配深字在 26px 高的按钮上读不出"已经推满"这件事。
+     反白字不能用 --ht-white：面板是暖白，纯白压红会发粉。 */
+  --hold-bg: var(--ht-ba-50);
+  --hold-fill: var(--ht-ba-500);
+  --hold-ink: var(--ht-ba-700);
+  --hold-fill-ink: var(--ht-gray-0);
+
+  /* ── 内边距（容器级统一口径）──────────────────────────
+     四个数字对应四层容器，别处不要再写 padding 裸值：
+       面板/浮层外沿 16 · 卡片与成组区块 16（与面板同宽，左右才对齐）
+       列表行与按钮行 8 · 行内左右余量 8 · 行间 4 · 组间 16
+     "设置里框没对齐"那次，根因就是每一行各写各的左右 padding。 */
+  --ht-pad-panel: var(--ht-s3);
+  --ht-pad-card: var(--ht-s3);
+  --ht-pad-row: var(--ht-s2);
+  --ht-pad-inline: var(--ht-s2);
+  --ht-gap-row: var(--ht-s1);
+  --ht-gap-group: var(--ht-s3);
+  /* 滚动条宽度。设置页正文可滚、页脚不可滚，两条右边的竖线要落在同一处：
+     正文那一列要让出滚动条，页脚就得补同样多。宽度自己定死（见 .st-body
+     的 ::-webkit-scrollbar），两处才有一个可计算的共同值。 */
+  --ht-sb: 8px;
+
+  /* ── 字：六档字号 ─────────────────────────────────────
+     中文界面 12px 是正文下限——再小，浏览器"最小字号"会强抬到 16px，
+     抬了就撑爆行高（"文本显示不完全"那次就是这么来的）。
+     10px 只给数字微标与单位，且不承载唯一信息。 */
+  --ht-t1: 10px;   /* 微标 / 单位 / 计数 */
+  --ht-t2: 11px;   /* 辅助说明 */
+  --ht-t3: 12px;   /* 正文（主力） */
+  --ht-t4: 13px;   /* 强调正文 / 块标题 */
+  --ht-t5: 15px;   /* 面板标题 / 人名 */
+  --ht-t6: 17px;   /* 聚焦模式标题 */
+
+  /* ── 字：三档字重 ─────────────────────────────────────
+     400 / 550 / 650。不再出现 600、700——同一屏里 600 和 650 差 1%，
+     人眼分不出，只会让"哪个更重要"这个判断失效。 */
+  --ht-w-reg: 400;
+  --ht-w-med: 550;
+  --ht-w-bold: 650;
+
+  /* ── 字：四档字距 ─────────────────────────────────────
+     字号越大越要收（大字的默认间距显散），越小越要放（10px 的中文要撑开）。 */
+  --ht-ls-tight: -.02em;
+  --ht-ls-snug: -.01em;
+  --ht-ls-none: 0;
+  --ht-ls-wide: .04em;
+
+  /* ── 字：三档行高 ─────────────────────────────────────
+     标题 1.25 收紧成一块；正文 1.6 给呼吸；列表 1.4 折中。 */
+  --ht-lh-tight: 1.25;
+  --ht-lh-snug: 1.4;
+  --ht-lh-body: 1.6;
+
+  /* ── 行宽 ─────────────────────────────────────────────
+     正文一段最多 34em（中文约 34 字/行）。面板只有 400 宽，
+     这条主要约束问答答案与提示——超过 40 字/行，读到行尾要回头找开头。 */
+  --ht-measure: 34em;
+
+  /* 正文区里所有「块标题」共用一个字号（原来是 11px 与 13px 两种，
+     同一屏里像两个层级的东西，其实是一层）。
+     --ht-bar-sec 是段落标题左侧那道竖条的颜色，想统一改色只动这一处。 */
+  --ht-fs-h: var(--ht-t4);
+  --ht-bar-sec: var(--ht-ac);
+
+  /* 状态色由 JS 写在 --ht-st 上：天线灯、状态点共用同一处 */
+  --ht-st: var(--ht-gray-400);
+  --ht-bottom: 18px;
+}
+
+/* ══ 面板 ═══════════════════════════════════════════════ */
+/* （1.12.8）：时间与动作并进标题栏后，400 放不下（两行时间就要 160 左右）。
+   520 是"条件时间的值不被省略号切掉"的最小宽度；视口更窄时按 vw 收，
+   时间值退回省略号——宁可截断读数，也不让按钮挤出面板。 */
+#ht-panel {
+  position: fixed;
+  right: 18px;
+  bottom: 70px;
+  z-index: 2147483647;
+  width: min(560px, calc(100vw - 32px));
+  max-height: min(78vh, 700px);
+  /* 内容少时高度由内容撑，而设置 / 问答是 inset:0 的覆盖层，父级塌多高它就多高——
+     没生成过就点齿轮时只剩一圈空白。给个下限，浮层永远铺得开。
+     下限按视口比例（62vh），不写死 100vh-170px：那个 170 是估算值，窗口一矮就算穿。 */
+  min-height: min(440px, 62vh);
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  /* 液态玻璃的静态部分：不是半透明毛玻璃，而是"厚度"——
+     顶部一道内高光、底部一道极淡的内阴影、外圈 1px 同色描边。
+     折射／液面那些要 WebGL 与背景采样，扩展面板拿不到网页背景，
+     所以只借它的层次，不借它的光学（取舍写在 设计规范存档）。 */
+  background: linear-gradient(180deg, var(--ht-bg-0) 0%, var(--ht-bg-1) 100%);
+  border-radius: var(--ht-r-md);
+  box-shadow: var(--ht-e3),
+    /* 1px 同色描边放在最前：box-shadow 的列表顺序是"前 → 后"，
+       写在前面的先画、压在上面。对角高光会盖到最外圈这一像素，
+       所以描边必须排在它前面，边缘才不会被白光吃掉——
+       否则面板压在浅色网页上时，四条边会直接化掉。 */
+    inset 0 0 0 1px rgb(var(--ht-line-rgb) / .18),
+    /* 对角双向内高光：左上、右下成对的 1.5px 亮边。玻璃的"边缘受光"是成对的——
+       只留顶部一道时，面板看着像一张纸压在桌面上；补上对角那一对，
+       四个边就都有了方向，像一块有厚度的板。
+       （这套写法出自 LGGC-liquid-glass，MIT） */
+    inset 1.5px -1.5px 1px -1px rgb(var(--ht-white-rgb) / .95),
+    inset -1.5px 1.5px 1px -1px rgb(var(--ht-white-rgb) / .90),
+    inset 0 1px 0 rgb(var(--ht-white-rgb) / .95),
+    inset 0 -1px 0 rgb(var(--ht-gray-rgb) / .03);
+  color: var(--ht-ink-1);
+  /* 基准字号就是正文档（t3）：没自己写字号的元素，默认落在正文上 */
+  font: var(--ht-w-reg) var(--ht-t3)/var(--ht-lh-body) var(--ht-font);
+  text-align: left;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transform-origin: calc(100% - 22px) bottom;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(8px) scale(.98);
+  transition: opacity var(--ht-d-exit) var(--ht-e-in),
+    transform var(--ht-d-exit) var(--ht-e-in),
+    visibility 0s linear var(--ht-d-exit);
+}
+
+/* 这里本来还想再加一层「对角反光」（LGGC / gitee 那版 ::after 的白光渐变），
+   实测没必要，撤了：面板底是 var(--ht-bg-0)→var(--ht-bg-1)，把 rgb(var(--ht-white-rgb) / .36)
+   叠上去算出来是 (253,254,255)，差 1 个色阶——白叠白，等于没画。
+   反光要在玻璃上看得见，前提是底子本身透出后面的东西（半透明）；
+   而这块面板必须不透明，正文才能压在花花绿绿的政务站上还认得清。
+   两者不可兼得，取了可读性。取舍记在 设计规范存档 §3.13。 */
+#ht-panel.open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  /* 进面板不吃弹簧：面板是"从入口长出来"的，位置必须落得干脆。
+     原来这里挂 cubic-bezier(.34,1.34,.64,1)，边沿会往外鼓一下再收回来，
+     在 400px 的小窗上读作"抖"，不像大厂该有的稳。 */
+  transition: opacity var(--ht-d-enter) var(--ht-e-out),
+    transform var(--ht-d-enter) var(--ht-e-out),
+    visibility 0s;
+}
+#ht-panel.closing { transform: translateY(4px) scale(.99); }
+/* 打开时焦点落到面板容器上（读屏会播报对话框名），但不要画出焦点框 */
+#ht-panel:focus { outline: none; }
+
+/* ── 两条全局排版纪律 ───────────────────────────────────
+   ① 数字等宽：时间、起数、百分比在竖列里必须对齐。比例数字（默认）的 "1" 比 "8"
+      窄，"11月7日" 与 "11月16日" 右边缘就差出几个像素，一列读下来像被啃过。
+   ② 正文防孤字：末行只剩一个字（中文尤其明显，一个方块孤零零挂在左边）
+      是排版里最刺眼的一处。text-wrap: pretty 会回头调上一行的断点避开它。
+
+   为什么写在选择器列表里而不是 #ht-panel 上：这两条都是继承属性，但
+   `font:` 简写会把 font-variant-numeric 重置回 normal，而本项目几乎每个控件
+   都用了 font: 简写。写在容器上等于被后面的简写逐个覆盖掉，只有逐类声明才生效。 */
+.ht-range dd,
+.ht-base,
+.ht-item .ro,
+.ht-item textarea,
+.ht-ck,
+.ht-ck .d,
+.fq-a,
+.st-desc,
+.st-msg,
+.ht-hint {
+  font-variant-numeric: tabular-nums;
+}
+.ht-item .ro,
+.fq-a p {
+  text-wrap: pretty;
+}
+
+/* 内容轻微上浮，仅首次挂载时播 */
+/* 问答浮层不参与这次上浮：它是 inset:0 的整块覆盖层，
+   跟着位移会把底下的内容从边上露出来 */
+#ht-panel.open .ht-body > *:not(.ht-faq) { animation: ht-rise var(--ht-d-content) var(--ht-e-out) both; }
+#ht-panel.open .ht-body > *:nth-child(2) { animation-delay: 20ms; }
+#ht-panel.open .ht-body > *:nth-child(3) { animation-delay: 40ms; }
+@keyframes ht-rise {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ── 标题栏：一行 ────────────────────────────────────────
+   0.10 把底部状态栏并进标题栏时，是先并成**第二行**；一行字 15px、
+   一行字 11px 叠在左上角，整块读起来"厚"，而且把右边的六个按钮
+   逼得更靠边。现在改回一行：名字 → 状态（带分隔线）→ 弹簧 → 六个按钮。
+   倒计时同步压短（"还有 1 小时 40 分"，截点在区间块里已有）。 */
+.ht-head {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  /* 一行里只剩两种东西：一颗圆点加三个字的状态、四个图标按钮。
+     全部居中对齐、等间距，不再有基线之争——名字撤掉之后没有大字号要照顾，
+     这也是"间距均匀"最省事的做法。 */
+  align-items: center;
+  gap: var(--ht-s2);
+  min-height: 38px;
+  /* 左缘跟正文对齐（--ht-pad-panel），右缘保持 8：图标盒 24 里图标只占 14，
+     光心天然内缩 5px，右侧若也补到 16，「关闭」会往里退 8px，
+     与正文右缘差出半个图标。左 16 / 右 8 才是"两点都对齐"。 */
+  padding: var(--ht-s1) var(--ht-s2) var(--ht-s1) var(--ht-pad-panel);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.ht-head:active { cursor: grabbing; }
+#ht-panel.is-dragging { transition: none; }
+#ht-panel.is-dragging .ht-head { cursor: grabbing; }
+#ht-panel.is-dragging { box-shadow: var(--ht-e3), 0 0 0 2px rgb(var(--ht-brand-rgb) / .18); }
+/* 吸附回去要有个过渡，否则"啪"地贴边，看不出发生了什么。
+   用 1200/80 的过阻尼采样曲线：起步快、末段贴着终点走完，零回弹。
+   位置类动画最容易露怯——用 ease-out 收尾会"滑到边上再弹一下"，
+   用弹簧欠阻尼会来回摆，只有过阻尼是"推过去就停住"。 */
+#ht-panel.is-snapping {
+  transition: left var(--ht-d-snap) var(--ht-e-drag), right var(--ht-d-snap) var(--ht-e-drag),
+    bottom var(--ht-d-snap) var(--ht-e-drag), top var(--ht-d-snap) var(--ht-e-drag);
+}
+/* 标题栏不再需要弹簧：（1.12.8）起两行读数自己 flex 吃掉余量（.ht-range）。 */
+
+/* 标题栏折行（窄到一条排不下时）─────────────────────────
+   520px 以下（小窗口、或浏览器放到很高倍）七组东西挤不进一条：
+   实测 480 视口时 状态 71 + 读数 193 + 周期 84 + 查询/复制/导出 72 +
+   设置组 60 + 六个间距 48 = 528，比可用的 448 宽出 80。
+   不硬挤——硬挤的结局是某一颗按钮被裁掉，而"点不到"比"两行"糟得多。
+   让两行读数整块落到第二行，第一行留给状态与六颗按钮：功能一个不少，
+   代价只是标题栏高 18px。
+   为什么不再往下适配 320：桌面 Chrome 的窗口本身就缩不到那么窄，
+   真到那一步已经不该用这个面板，而不是布局没做好。 */
+@media (max-width: 520px) {
+  .ht-head { flex-wrap: wrap; row-gap: 3px; }
+  .ht-range { order: 9; flex: 1 0 100%; margin: 0; }
+  /* 折行后读数不再把右侧一组推开，第一行要靠它自己靠右 */
+  .ht-minor { margin-left: auto; }
+}
+
+/* 产品名与版本号从标题栏撤掉了：名字在入口上，版本在设置页与更新提示里。
+   这里不再留样式——留着只会诱使后来人把它加回来。 */
+
+/* 刷新：标题栏里唯一带强调色的按钮，规格与其它图标按钮完全一致。
+   原来写「生成」两个字、52px 实心块，比旁边四个图标高一头，
+   "统一按钮"就无从谈起；一个绕圈箭头比"生成"更直接地说明这是重新取数。 */
+.ht-ico.ht-gen { color: var(--ht-ac); }
+.ht-ico.ht-gen:hover { background: var(--ht-ac-w); color: var(--ht-ac-d); }
+/* 查询图标（1.12.17 按官网 CSS 档重做，status mark）：**一个环**，四种状态靠
+   同一个环的 dasharray 变出来，不换元素：
+     静止   8 段刻度（每段占自己槽位的 30%），整体 55% 透明度
+     查询中 一道占 arcLength 的弧，dashoffset 匀速跑（看着在转）
+     完成   一整圈 + 圈内一层淡底 + 对勾从 0 描到 1
+     出错   同样整圈，红色，画叉
+   为什么这样做：换形不换元素，点击那一刻视线不用重新找按钮。
+   旧版是"整圈 + 另画一道弧"，静止时缺口会被读成"加载到一半"；
+   现在静止是刻度圈，反而更像"待命"。
+
+   圆环给 pathLength="100"，所以长度全是百分数：刻度 / 弧 / 整圈用同一套数，
+   CSS 里能直接写 100 0，不必知道真实周长。 */
+.ht-ico.ht-gen .ht-mark {
+  width: var(--ui-mark-size);
+  height: var(--ui-mark-size);
+  overflow: visible;
+}
+.ht-ico.ht-gen .ht-mark circle,
+.ht-ico.ht-gen .ht-mark path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--ui-mark-sw);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 底圈：查询中显出 20% 的灰环（弧在它上面跑），完成 / 出错时铺一层淡底 */
+.ht-ico.ht-gen .mk-track {
+  fill: currentColor;
+  stroke: currentColor;
+  fill-opacity: 0;
+  stroke-opacity: 0;
+  transition: fill-opacity var(--ht-d-tap) ease, stroke-opacity var(--ht-d-enter) ease;
+}
+.ht-ico.ht-gen[data-mark="run"] .mk-track { stroke-opacity: .2; }
+.ht-ico.ht-gen[data-mark="done"] .mk-track,
+.ht-ico.ht-gen[data-mark="bad"] .mk-track { fill-opacity: var(--mk-fill, .06); }
+/* 环本体：dasharray 在"刻度 ↔ 弧 ↔ 整圈"之间过渡，
+   缓动用 MORPH 那条（0.77,0,0.175,1）——先慢后快再慢，像"抽"出来 */
+.ht-ico.ht-gen .mk-ring {
+  opacity: .55;
+  transition: stroke-dasharray var(--ht-d-content) cubic-bezier(.77, 0, .175, 1),
+    opacity var(--ht-d-enter) ease;
+}
+.ht-ico.ht-gen[data-mark="run"] .mk-ring,
+.ht-ico.ht-gen[data-mark="done"] .mk-ring,
+.ht-ico.ht-gen[data-mark="bad"] .mk-ring { opacity: 1; }
+.ht-ico.ht-gen[data-mark="run"] .mk-ring { stroke-dasharray: var(--mk-arc); }
+.ht-ico.ht-gen[data-mark="done"] .mk-ring,
+.ht-ico.ht-gen[data-mark="bad"] .mk-ring { stroke-dasharray: 100 0; }
+/* 转圈用 dashoffset（不是 transform）：环上的刻度随偏移整体流动，
+   一整圈正好是一个循环，接缝在数值上刚好对齐；transform 转的是元素，
+   停止时角度停在哪儿都说得过去，停下那一下会"闪"一下图案。 */
+.ht-ico.ht-gen[data-mark="run"] .mk-ring {
+  animation: ht-spin var(--ui-mark-spin) linear infinite;
+}
+@keyframes ht-spin {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -100; }
+}
+/* 对勾 / 叉：pathLength=1，所以 dasharray 1 2 + offset 1.05 就是"整条藏着"。
+   描线延迟 120ms：等环合拢成整圈之后才画，两件事同时开始会看不清先发生了哪个。 */
+.ht-ico.ht-gen .mk-ck,
+.ht-ico.ht-gen .mk-x {
+  opacity: 0;
+  stroke-dasharray: 1 2;
+  stroke-dashoffset: 1.05;
+  transition: stroke-dashoffset var(--ht-d-tap) var(--ht-e-out), opacity 0s linear var(--ht-d-tap);
+}
+.ht-ico.ht-gen[data-mark="done"] .mk-ck,
+.ht-ico.ht-gen[data-mark="bad"] .mk-x {
+  opacity: 1;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset var(--ui-mark-draw) var(--ht-e-out) var(--mk-check-delay),
+    opacity 0s linear var(--mk-check-delay);
+}
+.ht-ico.ht-gen[data-mark="done"] { color: var(--ht-ok); }
+.ht-ico.ht-gen[data-mark="done"]:hover { background: var(--ht-ok-w); color: var(--ht-ok-700); }
+.ht-ico.ht-gen[data-mark="bad"] { color: var(--ht-ba); }
+.ht-ico.ht-gen[data-mark="bad"]:hover { background: var(--ht-ba-w); color: var(--ht-ba-700); }
+/* 系统偏好"减少动态效果"时不转：弧还是亮着的（这是状态，不是动画），
+   只是不转，仍然看得出"这一颗在忙"，而不是完全没反馈。 */
+@media (prefers-reduced-motion: reduce) {
+  .ht-ico.ht-gen .mk-ring { transition: opacity var(--ht-d-enter) ease; }
+  .ht-ico.ht-gen[data-mark="run"] .mk-ring { animation: none; }
+  .ht-ico.ht-gen .mk-ck,
+  .ht-ico.ht-gen .mk-x { transition: opacity var(--ht-d-enter) ease; stroke-dashoffset: 0; }
+}
+/* 取数中与冷却期都只是"置灰"，按钮自己不画任何进度——
+   避免和标题栏那条进度线抢戏，也避免看起来像另一个加载指示器 */
+
+.ht-ico {
+  flex: 0 0 auto;
+  /* 图标没有基线，别让它参与基线分组（否则按钮底边会被拽到文字的基线上） */
+  align-self: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: transparent;
+  color: var(--ht-ink-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease,
+    transform var(--ht-d-press) ease;
+}
+.ht-ico:hover { background: var(--ht-bg-2); color: var(--ht-ink-1); }
+/* 按下时加一道内阴影：玻璃被按住是"陷下去"，不是"缩一下" */
+.ht-ico:active {
+  transform: scale(.94);
+  box-shadow: inset 0 1px 3px rgb(var(--ht-gray-rgb) / .13);
+}
+.ht-ico:focus-visible { outline: none; box-shadow: 0 0 0 2px rgb(var(--ht-brand-rgb) / .4); }
+
+/* 右上角那一组次要功能：版本号 + 设置 / 问答 / 关闭。
+   标题栏只留一个被强调的动作（刷新），这三个用更小的盒子、压到墨 4，
+   靠位置与明度退到后面；版本号是识别用的小字，不细看看不见。 */
+.ht-minor {
+  flex: 0 0 auto;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  /* 与查询按钮之间只靠间距分开，不再画竖线：
+     一行里已经有"强调色 / 墨 4"两层明度，再加一道线就是第三种分隔手段。
+     间距取与标题栏同一个令牌，四个按钮之间与"状态—按钮"之间才一样宽。 */
+  gap: var(--ht-s2);
+  margin-left: 0;
+}
+.ht-ico.ht-ico-s { width: 20px; height: 20px; color: var(--ht-ink-4); }
+.ht-ico.ht-ico-s svg { width: 13px; height: 13px; }
+.ht-ico.ht-ico-s:hover { background: var(--ht-bg-2); color: var(--ht-ink-2); }
+.ht-ico.ht-ico-s.is-off { color: var(--ht-gray-300); }
+/* 复制与导出是"把成品拿走"，比设置/问答/关闭常用一档：
+   盒子仍是 20（标题栏只放得下这一档），明度从墨 4 提到墨 3——
+   六颗按钮全压到墨 4 的话，人第一眼找不到"复制在哪"。 */
+#ht-copy,
+#ht-exp { color: var(--ht-ink-3); }
+#ht-copy:hover,
+#ht-exp:hover { color: var(--ht-ink-1); }
+/* 动作回执：复制 / 导出完成的 1.3 秒里，按钮换成对勾并变绿（失败是叹号 + 红）。
+   用语义色令牌，和校验栏「通过」是同一支绿，不另起一套颜色。
+   背景也一起给上——只描个绿图标在浅底上太轻，扫一眼会以为只是 hover。 */
+.ht-ico.ok, .ftb.ok { color: var(--ht-ok); background: var(--ht-ok-w); }
+.ht-ico.bad, .ftb.bad { color: var(--ht-ba); background: var(--ht-ba-w); }
+.ht-ico.ok svg, .ftb.ok svg { stroke-width: 2.4; }
+/* 对勾出现的性格：380/18 欠阻尼，从 0.82 弹到 1.035 再落回 1。
+   底座是 0.82 而不是 0——从 0 长出来是"加载完"的语汇，而对勾是"完成了"，
+   它应该像被按下去的东西弹回来，起点已经在那儿。 */
+.ht-ico.ok svg, .ftb.ok svg { animation: ht-tick var(--ht-d-tick) var(--ht-e-tick) both; }
+@keyframes ht-tick {
+  from { transform: scale(.82); }
+  to { transform: none; }
+}
+/* 回执自熄：2.5 秒后先淡下去，再换回原图标。
+   直接换是跳变（对勾与原图标尺寸不同），淡出那 160ms 把跳变藏进过渡里。 */
+.ht-ico.is-fading, .ftb.is-fading { animation: ht-fade var(--ht-d-exit) var(--ht-e-in) both; }
+@keyframes ht-fade {
+  from { opacity: 1; }
+  to { opacity: .25; }
+}
+.ht-ico svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.9;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 置灰但不 disabled：点击还能给出「请先登录」四个字 */
+.ht-ico.is-off { color: var(--ht-gray-300); cursor: not-allowed; }
+.ht-ico.is-off:hover { background: transparent; color: var(--ht-gray-300); }
+.ht-ico.is-off:active { transform: none; }
+.ht-ico.on { background: var(--ht-ac-w); color: var(--ht-ac-d); }
+
+/* ── 导出菜单（1.12.17 版，glide select）──────────────────────
+   两份表共用一个 ⇩，点开选一份。菜单右缘与按钮右缘对齐、往左铺：
+   往右铺会盖住标题与状态字。阴影只加一层浅的——面板本身已有投影，
+   这里再来一层重的，两层叠在暗色页面上会糊成一圈脏边。
+   定位由 panel.js 现算（右缘与上沿都按按钮 rect），这里只管长相。
+
+   （1.12.16）换的是"选择框"那一半：菜单从图标所在的角长出来（transform-origin
+   在右上角），指针移到哪一行，底下的高亮块就滑到哪一行；指针离开时回到
+   上一次停的那行。标题栏本身不动——还是那颗 ⇩，只借了选择框的展开与高亮。
+   （1.12.17 按官网 CSS 档补齐）展开是"缩放 0.95 + 淡入"，收起另给一条更短的
+   时长（参考实现取展开的 2/3）；高亮块改走 transform，透明度单独一条 150ms。
+   宽度 / 行高 / 两个时长都是设置页「界面 · 导出菜单」里的参数。 */
+.ht-menu {
+  position: absolute;
+  z-index: 30;
+  /* 宽度参数就是**看得见的那条边**：不给 border-box 时 200 会变成 200 + 内边距
+     + 两条 1px 边 = 209，滑到 200 的人会发现菜单还是宽了一截。 */
+  box-sizing: border-box;
+  min-width: var(--ui-menu-w);
+  padding: var(--ht-s1);
+  border: 1px solid var(--ht-line);
+  border-radius: var(--ui-menu-r);
+  background: var(--ht-bg-1);
+  box-shadow: 0 8px 22px rgb(0 0 0 / .13), 0 2px 5px rgb(0 0 0 / .05);
+  /* 从右上角长出来：那个角就是 ⇩ 所在的位置，视觉上"菜单是从按钮里出来的" */
+  transform-origin: 100% 0;
+  opacity: 0;
+  transform: scale(.95);
+  transition: opacity var(--ui-menu-pop) var(--ht-e-out),
+    transform var(--ui-menu-pop) var(--ht-e-out);
+}
+.ht-menu.is-open { opacity: 1; transform: none; }
+/* 收起：时长按参考取的 2/3，并且立刻断掉指针——不然手快的人能点到正在淡出的行 */
+.ht-menu.is-closing {
+  transition-duration: var(--ui-menu-pop-out);
+  pointer-events: none;
+}
+/* 高亮块：一行高的圆角块，位置由 uikit.js 的 mountGlide 用 transform 摆。
+   它铺在按钮下面（按钮 z-index 1），按钮自身透明——文字压在块上，不重画。 */
+.ht-glide {
+  position: absolute;
+  left: var(--ht-s1);
+  right: var(--ht-s1);
+  top: 0;
+  height: 0;
+  border-radius: calc(var(--ui-menu-r) - var(--ht-nudge));
+  background: var(--ht-bg-3);
+  opacity: 0;
+  pointer-events: none;
+  /* 位移走 glideDuration，淡出单独 150ms：两块底交接时不会同时存在 */
+  transition: transform var(--ui-menu-glide) var(--ht-e-out), opacity var(--ht-d-tap) ease;
+}
+.ht-glide.is-on { opacity: 1; }
+/* 一行就是一份文件名（1.12.18）：单行、垂直居中。
+   以前是"标题 + 一行灰色副题"两层，菜单因此要 40px 一行才不挤；
+   现在一行字，居中之后 32px 就够。 */
+.ht-menu button {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: var(--ui-menu-row);
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: calc(var(--ui-menu-r) - var(--ht-nudge));
+  background: transparent;
+  color: var(--ht-ink-1);
+  font: var(--ht-w-med) var(--ht-t3)/var(--ht-lh-snug) var(--ht-font);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+/* 行是固定高度：高亮块要能准确地停在行上，行高就不能被内容撑。 */
+.ht-menu button:hover { background: transparent; }
+.ht-menu button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(var(--ht-brand-rgb) / .4);
+}
+
+/* ── 标题栏下边缘的进度线：所有加载反馈都走这一条 ───────── */
+.ht-hline {
+  position: relative;
+  flex: 0 0 auto;
+  height: 2px;
+  background: var(--ht-bg-3);
+  overflow: hidden;
+}
+.ht-hbar {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: 0;
+  background: var(--ht-ac);
+  /* 进度条推进按"内容"档（280），色变按"出现"档（200）。
+     原来这三条各写 260 / 300 / 200 且带一个裸 ease，改刻度时漏改一处，
+     条走完了颜色还没变到位。 */
+  transition: width var(--ht-d-content) var(--ht-e-out),
+    opacity var(--ht-d-enter) var(--ht-e-out),
+    background-color var(--ht-d-enter) var(--ht-e-out);
+}
+.ht-hbar.ok { background: var(--ht-ok-b); }
+.ht-hbar.warn { background: var(--ht-wa-b); }
+.ht-hbar.bad { background: var(--ht-ba-b); }
+.ht-hline.indet .ht-hbar { animation: ht-indet 1.15s var(--ht-e-out) infinite; }
+@keyframes ht-indet {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(300%); }
+}
+
+/* ── 瞬时反馈：跟着被点的按钮走，1.6 秒消失 ─────────────── */
+/* left / top 由 JS 按按钮位置写死；这里只给观感，不给位置 */
+.ht-hint {
+  /* 上界两个都要：一是可读行宽（--ht-measure），二是"别顶出面板"——
+     窄到 480 时一句"已打开站点，登录后这里接着取数"就能把面板撑出
+     一条横向滚动条。超了给省略号，不硬挤。 */
+  max-width: min(var(--ht-measure), calc(100% - 12px));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 10;
+  padding: var(--ht-s1) var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  background: rgb(var(--ht-gray-rgb) / .9);
+  color: var(--ht-bg-0);
+  /* 它是浮在正文上的一层，不是正文里的一行——没有投影会像印在段落上的一块脏墨 */
+  box-shadow: var(--ht-e2);
+  font: var(--ht-w-med) var(--ht-t2)/var(--ht-lh-snug) var(--ht-font);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(-3px);
+  transition: opacity var(--ht-d-exit) var(--ht-e-out),
+    transform var(--ht-d-exit) var(--ht-e-out);
+}
+.ht-hint.show { opacity: 1; transform: none; }
+
+/* ── 主体 ─────────────────────────────────────────────── */
+.ht-body {
+  position: relative;        /* 问答浮层的定位容器 */
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--ht-s2) var(--ht-pad-panel);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+/* 浮层（设置 / 问答）是 `inset: 0` 挂在这个滚动容器里的，它的上边缘跟着
+   容器的滚动量走：容器被滚过 20px，浮层就上移 20px、标题行被切掉半行。
+   （1.12.13）实测踩到过：设置页里滚到「全选」时，`scrollIntoView` 把沿途
+   每个滚动容器都滚了一遍，.ht-body 也在链上，截图里「设置」只剩半个字。
+   feedback.js 的 HT.veil 会在打开时把容器钉回顶部；这里再把容器关成不可滚，
+   免得浮层开着的时候又有 focus / scrollIntoView 把它推走。 */
+.ht-body:has(> .ht-set:not([hidden])),
+.ht-body:has(> .ht-faq:not([hidden])) { overflow: hidden; }
+
+/* ── 标题栏里的两行读数（1.12.8）────────────────────────
+   条件时间 / 查询时间原来占主体顶部两行（上面还有一行统计周期、
+   右边还有一行复制导出），正文被压下去 60 多像素。现在它们并进标题栏，
+   仍是上下两行：条件时间是这一轮按哪一刻结算，查询时间是按下查询的那一刻。
+   标签固定宽度（4.05em）：两行的标签同宽，值才对得齐；跟着字走的话，
+   "条件时间"与"查询时间"都是四个字倒还好，字号一变就会错开半个字。
+   字号比正文小一档（t1）——标题栏是"参数区"，读数是配角，动作是主角。 */
+.ht-range {
+  /* 余量全给它：左侧状态靠左、右侧一串动作靠右，中间这段空白正好是标题栏的
+     拖拽区——原来靠 .ht-sp 撑，现在读数自己就能撑开。 */
+  flex: 1 1 auto;
+  /* 再窄也不给到 0：低于这个宽度读数就只剩省略号，不如让按钮挤一挤 */
+  min-width: 82px;
+  max-width: none;
+  display: block;
+  margin: 0 0 0 auto;
+  padding: 0;
+}
+.ht-range .rw {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ht-s1);
+  min-height: 16px;
+}
+.ht-range dt {
+  flex: 0 0 auto;
+  width: 4.05em;
+  font-size: var(--ht-t1);
+  line-height: 16px;
+  color: var(--ht-ink-4);
+  white-space: nowrap;
+}
+.ht-range dd {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  text-align: left;
+  font: var(--ht-w-med) var(--ht-t1)/16px var(--ht-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ht-ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ht-range .q { color: var(--ht-ink-3); }
+
+/* 周期开关（日 / 周）：紧挨查询按钮，它决定"这一段有多长"，
+   与查询是同一个动作的两半——放一起才读得通"以哪一段、按哪一刻取"。
+   不带「统计周期」四个字：标题栏没有第二行给它，而日／周本身已经说明了维度。
+   （1.12.11）从两字压成单字：宽度从 84 省到 52，省下来的位置给读数放完整日期。
+   单字之后按键只剩 18px 宽，所以高度放宽（上下 3px）并给 22px 最小宽度——
+   一颗 16×18 的按钮按起来是在赌手感。
+
+   （1.12.16）换成分段滑块（rubber segment）：两颗按钮底下有一块会滑的底，
+   换项时它先横跨新旧两格、末端越过一点再弹回。为什么值得：这两颗按钮切的是
+   整份文稿方案，按下去要重取一份稿子；底块滑过去比高亮"跳"过去更能说明
+   "换的是同一件事的另一边"，也让这 30 秒的等待有一帧可信的反馈。
+
+   （1.12.17）按官网 CSS 档重做，两处与之前不同：
+     ① 轨道与滑块都用**栅格**（等宽两格），滑块里放两份字的副本。
+        于是"选中"不是给字换颜色，而是被一块强调色的底盖住、副本反白露出来——
+        拉伸到一半时两格各反一半，这是这套控件唯一说得通的画法。
+     ② 滑块不再改 left/width，而是整条铺满内区、用 clip-path 裁出窗口
+        （左右两条边独立移动）。改宽度会把圆角拉变形，裁剪不会。
+   滑块由 uikit.js 的 slideThumb 摆；几何全走变量（高度 / 圆角 / 内边距），
+   在设置页「界面 · 分段开关」里调。 */
+.ht-per {
+  position: relative;
+  /* 标题栏是 flex 行：不写这一句，轨道会被挤成剩下的那点宽度。
+     原来靠 .ht-seg 的 flex 声明顶着，两套样式分开后得自己带。 */
+  flex: 0 0 auto;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  height: var(--ui-seg-h);
+  padding: var(--ui-seg-in);
+  box-sizing: border-box;
+  border-radius: var(--ui-seg-r);
+  background: var(--ht-bg-2);
+  /* 凹槽：与 .ht-seg 一脉，不然它在标题栏里像一块贴上去的色块 */
+  box-shadow: inset 0 1px 2px rgb(var(--ht-gray-rgb) / .07);
+  overflow: hidden;
+}
+/* 轨道底色取 bg-2 而不是透明：滑块是"盖上去的一条底"，
+   底下没有别的东西时，露出来的那两格就没有边界（原来靠按钮自己的圆角假装）。 */
+.ht-per button {
+  position: relative;
+  z-index: 2;
+  min-width: 0;
+  height: 100%;
+  /* 左右各留 --ui-seg-pad（默认 10px）。以前是 --ht-nudge（2px）：
+     两个字被挤成一条 36px 的小条，"日 / 周"读起来像连在一起的一个词。 */
+  padding: 0 var(--ui-seg-pad);
+  border: 0;
+  background: none;
+  color: var(--ht-ink-3);
+  font: var(--ht-w-med) var(--ht-t1)/1 var(--ht-font);
+  border-radius: calc(var(--ui-seg-r) - var(--ui-seg-in));
+  cursor: pointer;
+  outline: none;
+  opacity: .72;
+  transition: opacity var(--ht-d-tap) ease;
+}
+.ht-per button:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 2px; }
+/* 选中的那颗：字被滑块盖住了，本身只要不透明（不然会透出底下的深字） */
+.ht-per button.on { opacity: 1; }
+@media (hover: hover) and (pointer: fine) {
+  .ht-per button:hover { opacity: .92; }
+}
+/* 滑块：铺满内区的整条底，裁剪窗口由 clip-path 给（左右两条边各自动）。
+   里面两份副本与按钮同一套栅格，所以位置天然对齐；
+   反白字用 --ht-bg-0 而不是纯白——面板是暖白，纯白压蓝会发灰。 */
+.ht-thumb {
+  position: absolute;
+  z-index: 3;
+  inset: var(--ui-seg-in);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  border-radius: calc(var(--ui-seg-r) - var(--ui-seg-in));
+  background: var(--ht-ac);
+  box-shadow: var(--ht-e1), 0 1px 2px rgb(var(--ht-brand-rgb) / .18);
+  color: var(--ht-bg-0);
+  pointer-events: none;
+  /* clip-path 由 JS 写；还没贴位时先整条不显形，免得闪一下满宽 */
+  opacity: 0;
+  transition: opacity var(--ht-d-press) ease;
+}
+.ht-thumb.is-placed { opacity: 1; }
+.ht-per-copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: var(--ht-w-med) var(--ht-t1)/1 var(--ht-font);
+  white-space: nowrap;
+}
+
+/* ── 票据小尾巴（挂在标题栏状态字后面）─────────────────────
+   只在"票还剩不到五分钟"时出现三个字（`剩 4 分`），平时这个位置是空的，
+   标题栏宽度一点不变——所以它不占一行，也不推正文。
+
+   **过期了不显示。** 票面 exp 是签发时写下的 30 分钟，服务端并不按它逐秒掐人
+   （请求还带同源 Cookie），exp 过了照样能查数。写一句"已过期"的后果是：
+   人跑去登了一次，回来发现本来就是好的，中间那轮取数还被打断。
+   真被拒（401/403）时，状态字自己会变成「请登录」——那才是能点的那一下。 */
+.stb .ht-sts {
+  flex: 0 0 auto;
+  align-self: center;
+  font: var(--ht-w-med) var(--ht-t1)/1 var(--ht-mono);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  color: var(--ht-wa);
+  white-space: nowrap;
+}
+.stb .ht-sts[hidden] { display: none; }
+/* 状态可点（没票 / 票被拒 / 已校验）时不加图标，只换光标与悬停下划线：
+   标题栏这一行没有空位再放一颗按钮。 */
+.stb.is-act { cursor: pointer; }
+.stb.is-act:hover b { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── 基准时间（可点开改） ───────────────────────────────
+   平时读起来是一行静态值，不是按钮：面板上最主要的动作是"取数并成文"，
+   时间是个参数，做成显眼的按钮会跟主按钮抢注意力。悬停才露出可点的意思。 */
+.ht-base {
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: var(--ht-w-med) var(--ht-t1)/16px var(--ht-mono);
+  font-variant-numeric: inherit;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ht-nudge);
+  /* 行内对齐：**必须是 baseline，不能给任何偏移**。
+     （1.12.8） 之前这里是 -0.125em，本意是让 ▾ 的光心落到字的视觉中线；
+     但 vertical-align 只对 inline-level 盒子自己在行盒里的位置生效，
+     对 flex item 完全无效——图标是 align-items 在管。那 0.125em 唯一的作用
+     是把整个按钮相对行盒往下推 1.25px（10px 字下），
+     于是「条件时间」这四个字比它自己的值高一线，一打开面板就看得出来。
+     实测：dt 文字 y=58.38、值文字 y=59.63，差 1.25px = 0.125em。
+     现在把它归零，两行读数共用一条基线。） */
+  vertical-align: baseline;
+}
+.ht-base i {
+  font-style: normal;
+  opacity: .4;
+  transition: opacity var(--ht-d-press);
+}
+.ht-base:hover { color: var(--ht-ink-1); }
+.ht-base:hover i { opacity: .75; }
+.ht-base:focus-visible {
+  outline: 2px solid var(--ht-ac);
+  outline-offset: 2px;
+  border-radius: var(--ht-r-xs);
+}
+/* 手填过的值给一个点：一眼看出现在取的不是"每天 18:00 那个默认"，
+   否则补完前天的数忘了改回来，第二天打开会以为系统停了。
+   **用绝对定位，不走 flex。** 它是 ::before，若是 flex item 就会成为
+   第一个 item，而 inline-flex 的基线取自第一个 item——空盒没有基线，
+   整条基线会掉到按钮底边，这一行的字就会歪下去小半行。
+   绝对定位不参与布局，基线仍由值文本决定；左侧留 9px 给它落脚。 */
+.ht-base.is-set { position: relative; padding-left: 9px; }
+.ht-base.is-set::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: var(--ht-ac);
+}
+
+/* 编辑态：**两行读数一个字都不动**，编辑框以浮层出现在「条件时间」那一行原位。
+   （1.12.8）把输入框直接塞进 dd：28px 的框 + 一行按钮把 46px 的标题栏撑成两截，
+   整块还被顶出面板。
+   （1.12.9）改成把整个 #ht-range 抽出来做成浮层：标题栏不撑了，可代价是
+   **条件时间与查询时间两行一起搬家**——点一下时间，两行读数先跳一下再回来，
+   想对照"上一次什么时候查的"时它正好不在原处。
+   （1.12.11）只把**编辑框**浮出来：位置按被点那一行的矩形现算（见 panel.js
+   的 openBaseEdit），两行读数原地不动，浮层压在标题栏下沿之上、盖住正文顶部，
+   点取消就收回。浮层是标题栏的子节点但绝对定位——不参与 .ht-head 的 flex 排布，
+   所以标题栏高度、右侧那一串图标的位置一概不变。 */
+.ht-bpedit {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ht-s1);
+  min-width: 236px;
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-0);
+  box-shadow: var(--ht-e2), 0 0 0 1px var(--ht-line);
+}
+/* 浮层里的输入框撑满浮层宽度：浮层本身已经收到 236，再限宽会剩一条空边 */
+.ht-bpedit .bp-in { max-width: none; }
+.ht-bpedit .bp-acts { justify-content: flex-end; }
+/* 正在改的那一行给一点回应：值换成浅底小方块，一眼看出"这一格现在是输入态"。
+   只加背景与内边距，不加边框、不改行高——读数本身仍在原位，跳一下就是对不上。 */
+.rw.is-editing dd { border-radius: var(--ht-r-xs); background: var(--ht-bg-2); }
+.bp-in {
+  width: 100%;
+  max-width: 208px;
+  height: 28px;
+  padding: 0 var(--ht-s2);
+  /* 不画边框：它坐在 bg-1 的区间块里，靠"比底亮一档"+ 一级极淡投影分层。
+     描边会把这一格从块里"切"出来，而它本来就是块的一部分。 */
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: var(--ht-bg-0);
+  box-shadow: var(--ht-e1);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-med) var(--ht-t3)/1 var(--ht-mono);
+  font-variant-numeric: tabular-nums;
+}
+/* 聚焦：不画 outline，改双环。
+   outline 是画在圆角**外面**的第二个方框，与控件不咬合，看着像"框套框"；
+   双环是「内环 1px 实色咬住边缘 + 外环 3px 柔光向外晕」，
+   两层都跟着控件自己的圆角走，才是"陷进去又被点亮"的观感。
+   （forced-colors 下 box-shadow 会被系统吃掉，那一档另有 outline 兜底，见文末。） */
+.bp-in:focus {
+  outline: none;
+  background: var(--ht-bg-0);
+  box-shadow: inset 0 0 0 1px var(--ht-ac), 0 0 0 3px rgb(var(--ht-brand-rgb) / .16);
+}
+.bp-acts { display: flex; gap: var(--ht-s1); }
+.bp-acts button {
+  height: 24px;
+  padding: 0 var(--ht-s2);
+  border: 1px solid var(--ht-line);
+  border-radius: var(--ht-r-xs);
+  background: var(--ht-bg-0);
+  color: var(--ht-ink-2);
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-font);
+  cursor: pointer;
+  transition: background var(--ht-d-press), border-color var(--ht-d-press);
+}
+.bp-acts button:hover { background: var(--ht-bg-2); }
+.bp-acts button[data-bp="ok"] {
+  border-color: var(--ht-ac);
+  background: var(--ht-ac);
+  color: var(--ht-bg-0);
+}
+.bp-acts button[data-bp="ok"]:hover {
+  border-color: var(--ht-ac-d);
+  background: var(--ht-ac-d);
+}
+.bp-acts button:disabled { opacity: .4; cursor: default; background: var(--ht-bg-0); }
+
+/* ── 校验下拉（只有「已校验」那一行点得开）────────────────
+   三样东西：状态图标加项数、仅问题/全部、逐条说明。
+   早先它常驻在时间下面一行，稿子没出时也占着一块地；收成下拉之后，
+   面板顶部只剩两个时间和两个动作，校验结果要看再点。 */
+.ht-ckpop {
+  position: absolute;
+  left: var(--ht-s2);
+  right: var(--ht-s2);
+  /* 上沿贴着标题栏下沿：高度由 panel.js 按标题栏实测高度写进 style.top，
+     字号设得再大也不会压住状态那一行。 */
+  top: 36px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ht-s2);
+  max-height: min(320px, 56vh);
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-md);
+  background: var(--ht-bg-0);
+  box-shadow: var(--ht-e2), 0 0 0 1px var(--ht-line);
+  opacity: 0;
+  transform: translateY(-3px);
+  pointer-events: none;
+  transition: opacity var(--ht-d-enter) var(--ht-e-out),
+    transform var(--ht-d-enter) var(--ht-e-out);
+}
+.ht-ckpop[hidden] { display: none; }
+.ht-ckpop.open { opacity: 1; transform: none; pointer-events: auto; }
+.ck-pop-hd {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  padding: 0 var(--ht-s1);
+}
+.ck-pop-hd .ic {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  color: var(--ht-ok);
+}
+.ht-ckpop[data-tone="bad"] .ck-pop-hd .ic { color: var(--ht-wa); }
+.ck-pop-hd .ic svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ck-pop-hd .rt {
+  flex: 0 0 auto;
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-font);
+  color: var(--ht-ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ck-pop-hd .rt.ok { color: var(--ht-ok); }
+.ck-pop-hd .rt.bad { color: var(--ht-wa); }
+.ck-pop-hd .sp { flex: 1; }
+
+/* 段落标题左侧那道竖条：与校验栏同一套度量（段落固定用 --ht-bar-sec）。 */
+.ht-item .bar {
+  flex: 0 0 auto;
+  width: 3px;
+  height: 13px;
+  border-radius: var(--ht-r-xs);
+  background: var(--ht-ok);
+}
+
+.ht-seg {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--ht-s1);
+  padding: var(--ht-s1);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-2);
+  /* 凹槽 + 凸起的选中块：同一套玻璃语汇里的"槽与块" */
+  box-shadow: inset 0 1px 2px rgb(var(--ht-gray-rgb) / .07);
+}
+.ht-seg button {
+  padding: var(--ht-s1) var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: transparent;
+  color: var(--ht-ink-3);
+  font: var(--ht-w-med) var(--ht-t1)/var(--ht-lh-snug) var(--ht-font);
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease;
+}
+.ht-seg button.on {
+  background: var(--ht-bg-0);
+  color: var(--ht-ink-1);
+  box-shadow: var(--ht-e1), 0 0 0 1px rgb(var(--ht-line-rgb) / .22);
+}
+.ht-seg button:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -1px; }
+
+/* ── 校验列表 ─────────────────────────────────────────── */
+/* 下拉里的清单：超过高度自己滚，不把面板撑高。
+   不再用 0fr 折叠——外层下拉本身就是开关，里层再折一道，
+   容易停在"半开"那一帧，且键盘 Tab 仍会走到看不见的行上。 */
+.ht-checks {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: none;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.ht-checks.show { display: block; }
+.ht-checks::-webkit-scrollbar { width: var(--ht-sb); }
+.ht-checks::-webkit-scrollbar-thumb {
+  background: var(--ht-gray-300);
+  border-radius: 0;
+}
+.ht-checks:hover::-webkit-scrollbar-thumb { background: var(--ht-gray-400); }
+/* 待核项一律直角 + 左侧一道强调线：小圆角卡片飘在方正的版式里最显突兀，
+   直角加竖线更像表格里的一行，和上下两块（区间、成文段）是同一个语汇。 */
+/* 每条校验整行可点：跳到 FAQ 里对应的说明。
+   所以它是个 <button>，把浏览器给的按钮默认外观全抹掉，只留原来的排版。 */
+.ht-ck {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  column-gap: var(--ht-s2);
+  width: 100%;
+  margin: 0;
+  padding: var(--ht-s1) var(--ht-s4) var(--ht-s1) var(--ht-s2);
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  font-family: var(--ht-font);
+  font-size: var(--ht-t3);
+  line-height: var(--ht-lh-snug);
+  color: var(--ht-ink-2);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  animation: ht-rise var(--ht-d-tap) var(--ht-e-out) both;
+}
+.ht-ck:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -2px; }
+/* 问号只在悬停时露出来：每行常显一个 ? 会让校验区变成一片问号 */
+.ht-ck .q {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  font-size: var(--ht-t1);
+  font-weight: var(--ht-w-bold);
+  color: var(--ht-ink-4);
+  background: var(--ht-bg-2);
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity var(--ht-d-press) ease;
+}
+.ht-ck:hover .q,
+.ht-ck:focus-visible .q { opacity: 1; }
+/* 整行可点（跳到 FAQ），但底色要留给"通过/待核"表达状态，
+   所以鼠标反馈走文字与问号两条：不动背景，不会把警示色顶掉。 */
+.ht-ck:hover { color: var(--ht-ink-1); }
+.ht-ck + .ht-ck { margin-top: var(--ht-nudge); }
+.ht-ck em {
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-style: normal;
+}
+/* 校验三态图标（Tabler Outline）：形状固定，颜色随 .ok / .warn / .bad 变 */
+.ht-ck em svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ht-ck b {
+  grid-column: 2;
+  grid-row: 1;
+  font-weight: var(--ht-w-med);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ht-ck .d {
+  grid-column: 2;
+  grid-row: 2;
+  color: var(--ht-ink-3);
+  font: var(--ht-w-reg) var(--ht-t1)/var(--ht-lh-snug) var(--ht-mono);
+  word-break: break-all;
+}
+.ht-ck.ok em { color: var(--ht-ok); }
+.ht-ck.bad { background: var(--ht-ba-w); color: var(--ht-ba-900); border-left-color: var(--ht-ba); }
+.ht-ck.bad em { color: var(--ht-ba); }
+.ht-ck.warn { background: var(--ht-wa-w); color: var(--ht-wa-900); border-left-color: var(--ht-wa); }
+/* 附注（note）：陈述口径事实，不是待核项，所以不给底色、不给强调线。
+   待填报这类事每期都有——一旦给它颜色，"有色"就不再等于"要看"，
+   真正该看的黄和红就被淹掉了。 */
+.ht-ck.note em { color: var(--ht-ink-4); }
+.ht-ck.note b { font-weight: var(--ht-w-reg); color: var(--ht-ink-2); }
+.ht-ck.warn em { color: var(--ht-wa); }
+.ht-ck-none { padding: var(--ht-s2); font-size: var(--ht-t3); color: var(--ht-ink-3); }
+
+/* ── 分段文字：标题行可折叠 ────────────────────────────── */
+/* 块与块之间只靠留白分：一条分割线会把"四段稿子"读成"四张表"。 */
+.ht-item { margin-bottom: var(--ht-s3); }
+.ht-item:last-child { margin-bottom: 0; }
+.ht-item .lb {
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s1);
+  min-height: 24px;
+}
+.ht-item .hd {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  /* 左内边距 4px 与 .ht-cktog 一致：两道竖条要落在同一条竖线上，
+     差 1px 人眼看得出来（"上面那道偏右"）。 */
+  padding: var(--ht-s1);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: transparent;
+  color: var(--ht-ink-1);
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease;
+}
+.ht-item .hd:hover { background: var(--ht-bg-1); }
+.ht-item .hd .bar { background: var(--ht-bar-sec); }
+.ht-item .hd:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+/* 标题必须**不小于**正文。原来是 11px，比正文 12.5 还小，读起来像正文的注解；
+   层级本该靠字重和颜色区分，不靠"把标题缩小"。 */
+.ht-item .hd b {
+  font-size: var(--ht-fs-h);
+  /* 行高收紧：继承下来的 1.7 会把标题行撑到 27px，比校验栏那行（26px）高一丝，
+     两行块标题看起来就不是一个规格了。 */
+  line-height: var(--ht-lh-tight);
+  font-weight: var(--ht-w-bold);
+  letter-spacing: var(--ht-ls-none);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: font-size var(--ht-d-tap) var(--ht-e-out);
+}
+
+/* 收起/展开：行尾一格，两个不带箭杆的 chevron。开着时向外张、合上时向里合，
+   所以不看文字也知道现在是什么状态。它和标题整行可点做的是同一件事，
+   留着是因为"状态"这件事需要一个固定的落点。 */
+/* 它在标题框**里面**：框右端留 4px，箭头自己再让一点，
+   所以宽度只给 20px（框外那个「专注」是 24px，两者不该一样重）。 */
+.ht-item .fold {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--ht-s1);
+  padding: 0;
+  border: 0;
+  /* 内扣：它坐在 .hd 里，.hd 是 8 圆角 + 4 内边距 → 子级 4。
+     照抄父级的 8 会让小方块的四角比外框还圆，看着像"贴上去的另一个东西"。 */
+  border-radius: var(--ht-r-xs);
+  background: transparent;
+  color: var(--ht-ink-4);
+  cursor: pointer;
+  opacity: .7;
+  transition: opacity var(--ht-d-press) ease, background-color var(--ht-d-press) ease,
+    color var(--ht-d-press) ease, transform var(--ht-d-press) ease;
+}
+/* 它是标题框的一部分，不是框里另外一颗按钮：
+   悬停**标题框**时它跟着一起亮，自己不再有独立的悬停态——
+   两个 hover 各亮各的，看起来就是"标题栏旁边还贴着一个小方块"。
+   按下时仍缩一下：那是"我按到了"的反馈，与"我指着它"是两件事。 */
+.ht-item .fold:hover { color: var(--ht-ink-1); opacity: 1; }
+.ht-item .hd:hover .fold { color: var(--ht-ink-1); opacity: 1; }
+.ht-item .fold:active { transform: scale(.9); }
+.ht-item .fold:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+.ht-item .fold svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* 逐段复制：坐在标题框**外面**、箭头右边。
+   它和「专注」是两种动作（拿走这一段 / 放大这一段），规格也分两档：
+   复制常用但轻，专注少用且重。 */
+.ht-item .cp {
+  flex: 0 0 auto;
+  margin-left: var(--ht-s1);
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: transparent;
+  color: var(--ht-ink-4);
+  cursor: pointer;
+  opacity: .8;
+  transition: opacity var(--ht-d-press) ease, color var(--ht-d-press) ease,
+    transform var(--ht-d-press) ease;
+}
+.ht-item:hover .cp { opacity: 1; }
+.ht-item .cp:hover { color: var(--ht-ac); }
+.ht-item .cp:active { transform: scale(.92); }
+.ht-item .cp:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+.ht-item .cp.ok { color: var(--ht-ok); }
+.ht-item .cp svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 逐段「专注」：把别的段落收起来，只留这一段并放大。
+   常驻、但压在墨 3 —— 每段都该有这么个动作，藏起来就没人发现；
+   压得够低又不会跟标题抢眼睛。原来的「字数 + 复制」两个提示就挤在这里，
+   删掉它们之后这一格正好让给真正要点的东西。 */
+.ht-item .pin {
+  flex: 0 0 auto;
+  margin-left: var(--ht-s1);
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: transparent;
+  color: var(--ht-ink-3);
+  cursor: pointer;
+  opacity: .85;
+  transition: opacity var(--ht-d-press) ease, background-color var(--ht-d-press) ease,
+    color var(--ht-d-press) ease, transform var(--ht-d-press) ease;
+}
+.ht-item:hover .pin,
+.ht-item .pin:focus-visible { opacity: 1; }
+.ht-item .pin:hover { color: var(--ht-ac); }
+.ht-item .pin:active { transform: scale(.92); }
+.ht-item .pin:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+.ht-item .pin svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 专注态右侧三个动作：复制这一段 / A− / A+。
+   原来这一格摆的是「115 字」——字数是看的信息，不是要点的动作；
+   专注时人真正想要的是"把这段拿走"和"字太小了放大点"。
+   平时整组不显示：列表里每行都挂三个图标，一眼看过去全是按钮。 */
+.ht-item .ft {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--ht-s1);
+}
+.ht-item.is-focus .ft { display: flex; }
+.ht-item .ftb {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: transparent;
+  color: var(--ht-ink-3);
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease,
+    transform var(--ht-d-press) ease;
+}
+/* 悬停只变色，不再画一块底色：它现在坐在专注态那张卡里，
+   一块浅灰小方块等于在框内又生出一个框（同一问题在 fold / pin 上已修）。 */
+.ht-item .ftb:hover { color: var(--ht-ac); }
+.ht-item .ftb:active { transform: scale(.9); }
+.ht-item .ftb:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+/* 复制成功的回执只能画在按钮上：专注时标题栏是收起的，没地方浮提示 */
+.ht-item .ftb.ok { color: var(--ht-ok); }
+.ht-item .ftb svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* 收起后留一行预览，免得只剩标题认不出是哪段 */
+.ht-item .pv {
+  display: none;
+  padding: 0 var(--ht-s1) var(--ht-s1) var(--ht-s3);
+  font-size: var(--ht-t3);
+  line-height: var(--ht-lh-body);
+  color: var(--ht-ink-4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ht-item.is-folded .pv { display: block; }
+.ht-item.is-folded .ro,
+.ht-item.is-folded textarea { display: none; }
+/* 展开那一瞬：正文淡入（exit 档 130ms，见下面的 .ro 规则）。
+   这里不能用 grid 0fr→1fr——收起显示的是**一行预览**、展开显示的是**整段正文**，
+   两者是不同的元素，不是同一块的高度变化。淡入既表达了"内容换了"，
+   又不会让整段长文字做位移（位移会让上下内容一起跳）。 */
+.ht-item:not(.is-folded) .ro { animation: ht-fade-in var(--ht-d-exit) var(--ht-e-out) both; }
+@keyframes ht-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* 进专注才切到 textarea；列表态一律只读（见 sections.js 里 .ro 的说明） */
+.ht-item.is-editing .ro { display: none; }
+
+/* 只读正文：初始界面就是它。
+   不设高度上限——用户要"完整展示"，截断+内部滚动等于把话切成两半；
+   面板本身有 max-height，装不下时整块滚动，比每段各自滚更符合读稿的习惯。
+   墨色取 ink-2 而不是 ink-1：段落标题（.hd b）与正文同为 13px，若两边都刷
+   主墨色，两者之间就只剩一个字重的差别，标题读起来只是"加粗的正文"。
+   正文降到 ink-2（深灰，对比度 9.8:1，仍远高于 AA），标题那份主墨色才立得住。 */
+.ht-item .ro {
+  display: block;
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-1);
+  color: var(--ht-ink-2);
+  font: var(--ht-w-reg) var(--ht-t4)/var(--ht-lh-body) var(--ht-font);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  cursor: text;
+  user-select: text;
+  transition: background-color var(--ht-d-press) ease;
+}
+.ht-item .ro:hover { background: var(--ht-bg-2); }
+/* 数字是这份稿子里唯一要"一眼对上"的东西：起数、占比、同比。 */
+.ht-item .ro .hn {
+  color: var(--ht-ac);
+  font-weight: var(--ht-w-med);
+  font-variant-numeric: tabular-nums;
+}
+/* 日期与时段：整段一处颜色（1.4.5）。
+   以前只有里面的数字被染成强调色，"月""日""时"留在墨色，
+   「11月12日18时」读起来像被剪成三截；现在整段由一个色承担。
+   用材质色而不是强调色：时间是**坐标**，不是结论——
+   和数字同色的话，一眼扫过去分不清哪个是要核对的量。 */
+.ht-item .ro .dt {
+  color: var(--ht-date);
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+.ht-item textarea {
+  display: none;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 54px;
+  padding: var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  outline: none;
+  resize: none;
+  background: var(--ht-bg-1);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t4)/var(--ht-lh-body) var(--ht-font);
+  /* 一层极浅的投影：正文区是这块面板上唯一"可以写东西"的表面，
+     在纯色底上给它一线浮起，眼睛才知道边界在哪、可以点进去 */
+  box-shadow: var(--ht-e1);
+  transition: background-color var(--ht-d-press) ease, box-shadow var(--ht-d-press) ease;
+}
+.ht-item textarea:hover { background: var(--ht-bg-2); }
+.ht-item textarea:focus { background: var(--ht-bg-0); box-shadow: var(--ht-e1), 0 0 0 3px rgb(var(--ht-brand-rgb) / .14); }
+/* 专注态才把编辑区放出来。用 display 而不是 visibility：隐藏时不该占高度，
+   否则列表态每段下面会多出一截空白（正是用户反馈的"框体没自适应"那种）。 */
+.ht-item.is-editing textarea { display: block; }
+
+/* ══ 专注（Focus）══════════════════════════════════════════
+ * 点段落右边的按钮，**面板里其他段落原地收起**，只剩这一段被放大。
+ * 不是浮窗：不动位置、不加阴影、不盖住网页，所以读起来不是"新开了一个窗口"，
+ * 而是同一块地方从"四条并排"变成"一条占满"（手风琴的 single-expand）。
+ *
+ * 别的段落用 display:none 直接消失，不做高度塌陷动画——
+ * 手风琴本来就是瞬间切换内容的，硬做高度过渡反而会先"卡住半秒再塌"。
+ * 观感靠两件事撑住：当前段 150ms 淡入（不位移），字号与文本框尺寸有过渡。
+ */
+/* 进入专注：标题栏与状态栏一并收起。改字的时候，"谁在出稿""剩余几项待核"
+   都是噪音，而且它们把可用高度吃掉了。退出靠段落标题行上的「恢复」与 Esc。 */
+#ht-panel.is-focus .ht-head { display: none; }
+/* 标题栏收起了，它下沿那条 2px 进度线也得跟着收。
+   否则专注态的顶上会留一道横条——不是任何东西的一部分，就是标题栏的残边。 */
+#ht-panel.is-focus .ht-hline { display: none; }
+/* 专注时校验栏也不属于"改这一段"，一并收起。
+   时间与复制/导出已经从（1.12.8）起并进标题栏，标题栏整块收掉时它们跟着走，
+   这里不再需要单独放行——那条 .ht-meta 规则删掉了，别再加回来。 */
+#ht-panel.is-focus .ht-ckbar,
+#ht-panel.is-focus .ht-cksub,
+#ht-panel.is-focus .ht-checks { display: none; }
+#ht-out.is-focus .ht-item:not(.is-focus) { display: none; }
+
+/* 专注态失焦：变淡，不消失。
+   人进专注多半是在对着网页核数，一点旁边就整块面板收起来，回来还得重新
+   进专注、光标也回不到原处——这是"点漏了"与"设计如此"分不清的典型。
+   变淡保留了"我现在没在用你"，同时一伸手就能碰回来。 */
+#ht-panel.is-dim {
+  opacity: .42;
+  transition: opacity var(--ht-d-enter) var(--ht-e-out);
+}
+#ht-panel.is-dim:hover { opacity: .6; }
+
+.ht-item.is-focus .hd { cursor: grab; }
+#ht-panel.is-dragging .ht-item.is-focus .hd { cursor: grabbing; }
+
+/* 专注态标题行是三组不同高度的东西（17px 标题、22px 复制/字号、24px 专注与箭头）。
+   基线对齐会让每一组各偏一点，整行看着是波浪；统一**下对齐**，
+   所有元素共用一条底边，图标按钮的下沿与标题字的下沿齐平。 */
+.ht-item.is-focus .lb { align-items: flex-end; }
+/* 标题不能顶到卡片底边：此前这里是 0，标题字的下缘与输入框的上边线贴着，
+   图上看就是"字压在框线上"。留一格给它自己。 */
+.ht-item.is-focus .hd { padding-bottom: var(--ht-s1); }
+/* 专注态标题行**与列表态同一排法**：标题靠左、动作靠右。
+   （1.6.2）曾把整组居中，结果左右两端空出一大片、标题往中间挪，
+   与列表态的读法不一致——同一份稿子在两态之间切换时标题会横向跳一下。
+   宽度交给 .hd 的 `flex: 1 1 auto`，箭头靠 `margin-left: auto` 收右，不再另设规则。 */
+
+.ht-item.is-focus { animation: ht-focus-in var(--ht-d-tap) var(--ht-e-out); }
+@keyframes ht-focus-in {
+  from { opacity: .35; }
+  to { opacity: 1; }
+}
+
+.ht-item.is-focus .hd b { font-size: var(--ht-t6); }
+/* 专注态**也摆**收起/展开，且与列表态同一位置（行尾）。
+   此前这里把它藏了，理由是"五个按钮会挤成一团"——
+   挤是因为它当时夹在标题与动作按钮之间；挪到行尾后只有它一个落点，
+   既不挤，也不必为"这一态怎么收起"另记一条规则（点标题仍能收起）。 */
+/* 专注时"恢复"是唯一的回头路（除了 Esc），必须一眼看得见：
+   常态压到 85% 透明是对的，这里不能压 */
+.ht-item.is-focus .pin { opacity: 1; color: var(--ht-ac); }
+.ht-item.is-focus .pin svg { width: 16px; height: 16px; }
+/* 字号由 --ht-fa 给：A− / A+ 只改一个变量，行高跟着字走，
+   不重排段落、也不动别的元素 */
+.ht-item.is-focus textarea {
+  /* 高度全交给 autoGrow：框的边长跟着字走，才有"界面整体在变"的感觉。
+     给一个下限只是防止内容只有一行时扁成一条。 */
+  min-height: 180px;
+  padding: var(--ht-s2) var(--ht-s3);
+  font-family: var(--ht-font);
+  font-weight: var(--ht-w-reg);
+  font-size: var(--ht-fa, var(--ht-t5));
+  line-height: var(--ht-lh-body);
+  /* 框就是外框的宽度：宽度 100% + border-box，左右内边距已经在算在里头，
+     所以字不会挤到框线外去（上一版看起来"文字压着边"就是这么来的）。 */
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  /* 一段长数字/英文串不换行时会把整行顶出框外，横向滚动条又难看——
+     政务数据里这种串不少，直接断开。 */
+  overflow-x: hidden;
+  overflow-wrap: anywhere;
+  /* 专注态它是这一屏唯一的主体，投影抬一档，和"只是列表里的一格"区分开 */
+  box-shadow: var(--ht-e2);
+  transition: background-color var(--ht-d-press) ease,
+    box-shadow var(--ht-d-press) ease, color var(--ht-d-tap) var(--ht-e-out),
+    height var(--ht-d-tap) var(--ht-e-out);
+}
+.ht-item.is-focus textarea:focus { box-shadow: var(--ht-e2), 0 0 0 3px rgb(var(--ht-brand-rgb) / .14); }
+/* 专注时收起（只剩标题行）：不要预览行，否则"只剩标题栏"就不成立了 */
+#ht-panel.is-focus .ht-item.is-focus.is-folded .pv { display: none; }
+/* 只留一条标题时，它就是盖在网页上的一个把手，实心会碍事——不碰它就淡下去。
+   判据只用 :hover 与 :focus-visible：鼠标点完按钮会留焦点，
+   若算 :focus-within，这条永远不触发，等于白写。 */
+#ht-panel.is-focus .ht-item.is-focus.is-folded:not(:hover) { opacity: .5; }
+#ht-panel.is-focus .ht-item.is-focus.is-folded:hover,
+#ht-panel.is-focus .ht-item.is-focus.is-folded:has(:focus-visible) { opacity: 1; }
+
+/* ── 专注态只留一个框（1.5.3）─────────────────────────────
+ * 以前是"面板一张卡 + 输入框另一张卡"叠着：面板留一圈白底，输入框再画一层
+ * 底色与投影，标题就挤在两层的缝里——外框、内框、标题三层线挨在一起，
+ * 既不好看也说不清哪层是"可写的"。现在由这一段自己当卡：
+ * 面板在专注态透明化，标题与正文共用一个边线框，正文只是框里的内容。
+ */
+#ht-panel.is-focus {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  /* 透明 + 原高度 = 一块看不见但能挡住网页点击的空区 */
+  min-height: 0;
+}
+#ht-panel.is-focus .ht-body { padding: var(--ht-s1); }
+.ht-item.is-focus {
+  margin-bottom: 0;
+  padding: var(--ht-s2) var(--ht-s2) var(--ht-s1);
+  background: var(--ht-bg-0);
+  /* 去边框：这张卡是浮在**网页**上的，靠 bg-0 与网页的明度差 + 二级投影分层，
+     比一圈 1px 灰线更"是一块面"。灰线还会让它看着像网页里的一个 input。 */
+  border: 0;
+  border-radius: var(--ht-r-md);
+  box-shadow: var(--ht-e2);
+}
+/* 正文不再是"第二个框"：去底色、去投影、去圆角，只在标题下面留一条分隔。
+   左右内边距归 0——卡的边就是它的边，再缩一圈就又变成框套框。 */
+.ht-item.is-focus textarea {
+  background: transparent;
+  /* 分隔线用内阴影画：border-top 占 1px 盒模型，会把正文整体推下 1px，
+     与卡内其它行的基线错开。这是分隔线，不是边框——别照着它给卡加框。 */
+  box-shadow: inset 0 1px 0 var(--ht-line);
+  border-radius: 0;
+  border: 0;
+  margin-top: var(--ht-s1);
+  padding: var(--ht-s2) 0 0;
+}
+.ht-item.is-focus textarea:hover { background: transparent; }
+/* 焦点落在整张卡上：外环向外晕，而不是在框里再画一圈光圈 */
+.ht-item.is-focus textarea:focus { background: transparent; box-shadow: inset 0 1px 0 var(--ht-line); }
+.ht-item.is-focus:focus-within { box-shadow: var(--ht-e2), 0 0 0 2px rgb(var(--ht-brand-rgb) / .28); }
+/* 专注态收起 = 只剩标题行，正文必须真的消失。
+   `.is-editing` 的 display:block 排在 `.is-folded` 的 display:none 之后，
+   此前点标题"没反应"就是这条优先级造成的——补一条更强的规则。 */
+.ht-item.is-focus.is-folded textarea { display: none; }
+/* 专注态标题行不给悬停底色：它已经在卡里，再来一块浅灰矩形，
+   四角与卡片圆角对不上，看着像卡上贴了张纸条。 */
+.ht-item.is-focus .hd:hover { background: transparent; }
+
+/* ── 空态 ─────────────────────────────────────────────── */
+.ht-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--ht-s2);
+  padding: var(--ht-s5) var(--ht-s1) var(--ht-s4);
+  text-align: center;
+  color: var(--ht-ink-3);
+  font-size: var(--ht-t3);
+  line-height: var(--ht-lh-body);
+}
+.ht-empty svg { width: 28px; height: 28px; opacity: .18; }
+
+/* 出错的空态：标题一句话、说明一句话、报修凭据一句小字。
+   三段的字号与颜色是刻意的——先看见"哪里出了问题"，再看"怎么办"，
+   最后才是那串给维护人员看的原文，不抢前面的注意力。 */
+.ht-err {
+  align-items: flex-start;
+  gap: var(--ht-s1);
+  text-align: left;
+  color: var(--ht-ink-2);
+  padding: var(--ht-s4) var(--ht-s3);
+}
+.ht-err b {
+  font-size: var(--ht-t4);
+  font-weight: var(--ht-w-med);
+  color: var(--ht-ink-1);
+  letter-spacing: var(--ht-ls-tight);
+}
+.ht-err span { font-size: var(--ht-t3); line-height: var(--ht-lh-body); }
+.ht-err em {
+  margin-top: var(--ht-s1);
+  padding: var(--ht-s2) var(--ht-s3);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-3);
+  font-family: var(--ht-mono);
+  font-size: var(--ht-t2);
+  font-style: normal;
+  line-height: var(--ht-lh-body);
+  word-break: break-word;
+  user-select: all;
+}
+
+/* 出错时那行「复制诊断信息」。有意做成最轻的一档：
+   边框而不是底色、次级墨色而不是主色蓝。红框里再放一个蓝按钮，
+   视觉上会像"点它就能修好"，而它其实只是把现场带走。
+   复制成功才短暂变绿——那是回执，不是成功态。 */
+/* 出错卡片脚下那一行：自动上报的说明。不是按钮——这一步没有人要做。
+   颜色压到最淡，它只是让"东西已经发走了"这件事有个交代。 */
+.ht-fbnote {
+  margin: var(--ht-s2) 0 0;
+  color: var(--ht-ink-4);
+  font-size: var(--ht-t1);
+  line-height: var(--ht-lh-body);
+}
+
+/* 数据缺口的提示条：贴着正文顶端，因为"少了哪一项"要在读正文之前知道 */
+.ht-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ht-s1);
+  margin: 0 0 var(--ht-s3);
+  padding: var(--ht-s2) var(--ht-s3);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-wa-50);
+  color: var(--ht-wa-700);
+  font-size: var(--ht-t2);
+  line-height: var(--ht-lh-body);
+}
+.ht-notice b { font-weight: var(--ht-w-med); }
+
+/* ── 状态：唯一的状态出口（标题栏最左）────────────────────
+   一颗圆点加三个字。圆点说"通不通"，三个字说"到哪一步"；
+   颜色只在三种语义里用（绿 / 橙 / 蓝），其余一律灰。
+   只有「已校验」那一种点得开——点开是校验下拉；其余状态不可点，
+   由 panel.js 把 aria-disabled 置成 true，样式也跟着退成不可点。 */
+.stb {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  /* 用 min-height 而不是 height：浏览器设了"最小字号"时 11px 会被抬到 16px，
+     固定高度装不下就上下裁掉半截字。 */
+  min-height: 24px;
+  /* 左缘与正文对齐：按钮自带 6px 内边距，向左抵消掉 */
+  margin-left: calc(-1 * var(--ht-s2));
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: transparent;
+  color: var(--ht-ink-3);
+  font: var(--ht-w-bold) var(--ht-t2)/1 var(--ht-font);
+  text-align: left;
+  cursor: default;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease;
+}
+/* 圈里画对勾 / 叹号 / 三点，形与数据校验那一行同源，颜色由下面四个语义类给。
+   直径取 14px：与 13px 的校验图标同档，放大了会在标题栏里比三个字还重。 */
+.stb .dt {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+}
+.stb .dt svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.stb b {
+  flex: 0 0 auto;
+  font-weight: var(--ht-w-bold);
+  font-size: var(--ht-t2);
+  letter-spacing: var(--ht-ls-none);
+  /* 颜色只给圈：三个字是读数，染色会让"出错了"变成红字标题，
+     在一屏黑字里比正文还抢眼。语义由圈承担，字保持墨色。 */
+  color: var(--ht-ink-2);
+}
+/* 绿 = 已校验 / 已就绪，黄 = 未登录 / 未到点，红 = 出错了，灰 = 进行中。
+   红黄两档都画同一个叹号，只换颜色——形状多一种就多记一种。 */
+.stb.ok { color: var(--ht-ok); }
+.stb.warn { color: var(--ht-wa); }
+.stb.bad { color: var(--ht-ba); }
+.stb.run { color: var(--ht-ink-3); }
+/* 只有这一种状态可点：悬停给一层底，光标变手 */
+.stb[aria-disabled="false"] { cursor: pointer; }
+.stb[aria-disabled="false"]:hover { background: var(--ht-bg-1); }
+.stb:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+/* 这里原来挂着一块「到截点还剩多久」的倒计时（.fx），0.19 撤掉了：
+   截点已经写在下面的条件时间里，倒计时是把同一件事说两遍。
+   留空这一段是给后来人看的——别再往标题栏加第二块状态信息。 */
+
+.ht-hidden { display: none !important; }
+
+/* ══ 口径与常见问题（FAQ）══════════════════════════════════
+ * 盖住面板主体的一块清单：分组标题 + 搜索 + 逐条折叠。
+ * 不新开页面、不弹浏览器窗口，仍然"在面板里"——和专注同一个原则：
+ * 所有东西都不离开这一块地方。校验项的说明也从这里出，只写一份。
+ */
+.ht-faq {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--ht-bg-0);
+}
+/* display:flex 写在类选择器上，会盖掉 UA 给 [hidden] 的 display:none。
+   上一版 #ht-pin 就栽在这里：浮层看不见却照常吃点击。必须显式声明。 */
+.ht-faq[hidden] { display: none; }
+
+/* ── 问答条目的展开过渡（渐进增强）───────────────────────
+   条目用的是 <details>：键盘、Ctrl+F 自动展开、屏幕阅读器都靠它的原生语义，
+   为了 200ms 动画把这套语义手写一遍不划算——所以不像校验区那样换成 grid，
+   而是让支持 ::details-content 的浏览器把高度也带上过渡。
+   不支持的老版本直接走原生瞬时展开：能用，只是没动画，不会坏。
+   （Chrome 131+ 起支持；本项目是 Chrome 扩展，绝大多数用户在新版本。） */
+@supports selector(::details-content) {
+  #ht-panel, :root { interpolate-size: allow-keywords; }
+  .ht-faq details::details-content {
+    block-size: 0;
+    overflow: hidden;
+    transition: block-size var(--ht-d-enter) var(--ht-e-out),
+      content-visibility var(--ht-d-enter) allow-discrete;
+  }
+  .ht-faq details[open]::details-content { block-size: auto; }
+}
+
+.fq-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  padding: var(--ht-s2);
+}
+.fq-head b { font-size: var(--ht-t4); font-weight: var(--ht-w-bold); letter-spacing: var(--ht-ls-none); }
+.fq-head .sp { flex: 1; }
+.fq-cnt {
+  font-size: var(--ht-t2);
+  color: var(--ht-ink-4);
+  font-variant-numeric: tabular-nums;
+}
+.fq-back {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: transparent;
+  color: var(--ht-ink-2);
+  cursor: pointer;
+}
+.fq-back:hover { background: var(--ht-bg-2); color: var(--ht-ink-1); }
+.fq-back:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+.fq-back svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fq-find { flex: 0 0 auto; padding: 0 var(--ht-s2) var(--ht-s2); }
+.fq-find input {
+  width: 100%;
+  box-sizing: border-box;
+  height: 27px;
+  padding: 0 var(--ht-s2);
+  /* 去边框：搜索框坐在 bg-0 的浮层里，靠 bg-2 与底拉开 4.7%（与设置页控件同层） */
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  outline: none;
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t3)/1 var(--ht-font);
+  transition: background-color var(--ht-d-press) ease, box-shadow var(--ht-d-press) ease;
+}
+.fq-find input:focus {
+  background: var(--ht-bg-0);
+  box-shadow: inset 0 0 0 1px var(--ht-ac), 0 0 0 3px rgb(var(--ht-brand-rgb) / .16);
+}
+
+/* 分类条（1.10.6）：清单到五十条以后，靠滚动找一类问题不现实。
+   横排、换行铺满、只在未搜索时出现——搜索时用户在按词找，两套导航同时摆会打架。
+   与下面的分类标题分工：这里是目录，那里是正文里的分隔。 */
+.fq-nav {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ht-nudge);
+  padding: 0 var(--ht-s2) var(--ht-s2);
+}
+.fq-nav[hidden] { display: none; }
+.fq-chip {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-pill);
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-2);
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-font);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease;
+}
+.fq-chip:hover { background: var(--ht-bg-3); }
+.fq-chip.on { background: var(--ht-ink-1); color: var(--ht-bg-0); }
+.fq-chip:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+/* 分类导语：常驻、不折叠。它回答「这一组在讲什么」，
+   读者不该为了知道一组讲什么而先点开一条。 */
+.fq-intro {
+  margin: 0 0 var(--ht-s2);
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-1);
+  font-size: var(--ht-t2);
+  line-height: var(--ht-lh-body);
+  color: var(--ht-ink-2);
+}
+
+/* 对照清单：四行「名称 + 一句定位」。
+   不做表格——面板只有 400 宽，四列表格每列不到 90，读到第三列就换行，
+   比清单更难扫。名称定宽、说明吃掉剩余宽度，眼睛沿一列对齐往下走即可。 */
+.fq-dl {
+  display: grid;
+  grid-template-columns: 4.2em 1fr;
+  gap: var(--ht-nudge) var(--ht-s2);
+  margin: 0;
+}
+.fq-dl dt {
+  font-weight: var(--ht-w-bold);
+  color: var(--ht-ink-1);
+}
+.fq-dl dd { margin: 0; }
+
+.fq-list {
+  /* 必须是定位容器：面板里用 offsetTop 把某一条滚到眼前，
+     若这里不定位，offsetTop 会相对 .ht-faq 算，凭空多出标题与搜索框那 90px */
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 0 var(--ht-s2) var(--ht-s2);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.fq-g {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  /* 分类之间留一大档：91 条的清单里，靠一档留白把"换话题了"说出来。
+     条目之间只留 nudge（2px），两种间距差三倍，层次才立得住。 */
+  margin: var(--ht-s3) 0 var(--ht-s1);
+  padding: var(--ht-s1) 0;
+  background: var(--ht-bg-0);
+  font-size: var(--ht-t2);
+  font-weight: var(--ht-w-bold);
+  letter-spacing: var(--ht-ls-wide);
+  /* 与设置页的分节标题（.st-sub）同规格：两者都是"把一长串切成几组"的
+     小标题，同一个角色不设两套外观。 */
+  color: var(--ht-ink-3);
+}
+.fq + .fq { margin-top: var(--ht-nudge); }
+.fq > summary {
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  font-size: var(--ht-t3);
+  line-height: var(--ht-lh-snug);
+  color: var(--ht-ink-1);
+  cursor: pointer;
+  list-style: none;
+}
+.fq > summary::-webkit-details-marker { display: none; }
+.fq > summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 11px;
+  font-size: var(--ht-t1);
+  color: var(--ht-ink-4);
+  transition: transform var(--ht-d-tap) var(--ht-e-out);
+}
+.fq[open] > summary::before { transform: rotate(90deg); }
+.fq > summary:hover { background: var(--ht-bg-1); }
+.fq > summary:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -1px; }
+.fq-a {
+  padding: var(--ht-s1) var(--ht-s2) var(--ht-s2) var(--ht-s4);
+  /* 一段话最多 34 字/行：超过这条线，读到行尾要回头找开头 */
+  max-width: var(--ht-measure);
+  font-size: var(--ht-t3);
+  line-height: var(--ht-lh-body);
+  color: var(--ht-ink-2);
+}
+/* （1.9.0 删掉 .fq-meta：元数据不再显示，样式留着只会让人以为还有一处没清） */
+.fq-a b { font-weight: var(--ht-w-bold); color: var(--ht-ink-1); }
+/* 答案按段排：一段一件事（是什么 / 为什么 / 怎么办）。
+   以前三段靠 <br> 挤在一起，读起来是一坨字，找不到从哪看起。 */
+.fq-a p { margin: 0 0 var(--ht-s2); }
+.fq-a p:last-child { margin-bottom: 0; }
+.fq-scope { font-size: var(--ht-t2); color: var(--ht-ink-4); }
+
+/* 分类标题后面的条数：清单长的时候，先看"这一类有几条"再决定翻不翻 */
+.fq-gn {
+  margin-left: var(--ht-s1);
+  font-style: normal;
+  font-weight: var(--ht-w-reg);
+  color: var(--ht-ink-4);
+}
+/* 已修复/已失效的条目降权，但仍然可读：留档是为了"能认出老问题复发" */
+.fq[data-st="已修复"] > summary,
+.fq[data-st="已失效"] > summary { color: var(--ht-ink-3); }
+.fq-tag {
+  display: inline-block;
+  margin-left: var(--ht-s1);
+  padding: 0 var(--ht-s1);
+  border-radius: var(--ht-r-xs);
+  background: var(--ht-bg-2);
+  font-size: var(--ht-t2);
+  font-weight: var(--ht-w-med);
+  color: var(--ht-ink-3);
+  vertical-align: 1px;
+}
+.fq-a code {
+  padding: 0 var(--ht-s1);
+  border-radius: var(--ht-r-xs);
+  background: var(--ht-bg-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: var(--ht-t2);
+  color: var(--ht-ink-1);
+  font-variant-numeric: tabular-nums;
+}
+.fq-none {
+  padding: var(--ht-s4) var(--ht-s2);
+  text-align: center;
+  font-size: var(--ht-t3);
+  color: var(--ht-ink-4);
+}
+/* ── 滚动条：细，悬停才明显 ───────────────────────────── */
+#ht-panel *::-webkit-scrollbar { width: 8px; height: 8px; }
+#ht-panel *::-webkit-scrollbar-thumb {
+  background: var(--ht-bg-3);
+  border-radius: var(--ht-r-pill);
+  border: 2px solid var(--ht-bg-0);
+}
+#ht-panel *::-webkit-scrollbar-thumb:hover { background: var(--ht-gray-300); }
+
+/* ══ 自适应 ═══════════════════════════════════════════════
+   面板宽度是 min(400px, 100vw-32px)：宽屏就 400，窄屏跟着视口走。
+   两档补充，都只回答"空间不够时谁先让位"，不改字号——字号一改，四层层级就散了。
+   · ≤380 宽（手机竖屏、分屏半宽）：正文左右收一档，标签列让出 12px。
+     版本号藏起来：它不承担任何操作，而这一行已经挤到「文稿助手」被压成省略号。
+   · ≤560 高（笔记本横屏且开着书签栏）：不许面板撑出视口，装不下就整块滚。
+   ─────────────────────────────────────────────────────── */
+@media (max-width: 380px) {
+  #ht-panel, :root {
+    /* 改一处，面板与独立设置页同时收（页脚补滚动条那条是 calc 出来的，跟着走） */
+    --ht-pad-panel: var(--ht-s2);
+  }
+  .ht-vv { display: none; }
+  .st-k { flex: 0 0 76px; }
+  /* 模板行在窄屏改两行。一行放不下开关 + 名称 + 计数 + 四个动作，
+     而这一行里只有**名称**是可读信息——按"谁先让位"排，让名让、动作换行：
+     名称拿到 96px 起跳，动作组整组掉到第二行靠右。
+     不缩图标热区：它们是这一屏唯一的触屏目标，缩到 22px 以下就点不准。 */
+  .st-tpl-h { flex-wrap: wrap; row-gap: var(--ht-s2); }
+  .st-tin { flex: 1 1 96px; }
+  .st-ops { margin-left: auto; }
+}
+@media (max-height: 560px) {
+  #ht-panel { min-height: 0; max-height: calc(100vh - var(--ht-s4)); }
+}
+/* 触屏（pointer: coarse）：只放大**命中区**，不动视觉尺寸。
+   外扩靠伪元素——盒子一改，hover 那层圆角底色跟着变大，
+   而"玻璃板"的观感全靠那 24px。
+   外扩量必须 ≤ 间距的一半（标题栏 gap 8 → 两边各让 4），否则相邻两颗热区重叠，
+   表现成"点左边那颗、右边那颗亮起来"。 */
+@media (pointer: coarse) {
+  .ht-ico, .ht-item .pin { position: relative; }
+  .ht-ico::after, .ht-item .pin::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+  }
+  /* 开关 34×20 是整页最小的可点控件，手机上尤其容易点空：补到 44×32。
+     纵向补 6 不会压到下一行——设置页行高 40 起。 */
+  .st-sw::after {
+    content: "";
+    position: absolute;
+    inset: -6px -5px;
+  }
+}
+
+/* ── 无障碍与降级 ─────────────────────────────────────── */
+/* 系统开了"减弱动态效果"：不播放任何位移动画，只保留状态切换 */
+@media (prefers-reduced-motion: reduce) {
+  #ht-panel, #ht-panel * {
+    animation: none !important;
+    transition-duration: 1ms !important;
+  }
+}
+/* Windows 高对比度：用系统色兜底，不依赖阴影层级 */
+@media (forced-colors: active) {
+  #ht-panel, .ht-faq .fq-find input,
+  .ht-gen, .ht-item textarea, .ht-range, .ht-seg, .ht-per, .ht-ckbar {
+    border: 1px solid CanvasText;
+  }
+  .ht-ico:focus-visible, .ht-gen:focus-visible,
+  .ht-cktog:focus-visible, .ht-item .pin:focus-visible { outline: 2px solid Highlight; }
+  /* 常规态把聚焦提示全换成了双环 box-shadow（不画 outline）；但这一档会吃掉
+     box-shadow，必须把 outline 加回来，否则键盘用户完全看不见焦点在哪。 */
+  .st-in:focus, .st-ce:focus, .bp-in:focus, .fq-find input:focus {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
+  }
+  .ht-ico svg, .ht-item .pin svg { stroke: ButtonText; }
+}
+/* 打印页面时不该出现工具界面 */
+@media print {
+  :host { display: none !important; }
+}
+
+/* ══ 设置（面板内浮层）════════════════════════════════════
+ * 与问答同一个位置、同一套进出：都是盖住 .ht-body 的一整块。
+ * 0.9 的设置会跳到独立标签页，等于把手上这份稿子留在原地、
+ * 把配置搬到另一处改——改完还得自己回来。这里改完就回到稿子上。
+ * 样式与独立设置页共用（options.html 只换一个更宽的挂载点）。
+ */
+.ht-set {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--ht-bg-0);
+}
+.ht-set[hidden] { display: none; }   /* display:flex 会盖掉 UA 的 [hidden] */
+
+/* 覆盖层进出（设置 / 问答共用一套，基类挂在下面两处）。
+   位移只有 4px：盖住整块内容的浮层若滑 20px，底下正文会被"带着动"，
+   而它其实一动没动；4px 只够让人看出这块是从哪个方向长出来的。
+   用 animation 而不是 transition：基态必须可见（见 feedback.js 的 HT.veil），
+   动画靠 is-in / is-out 两个类触发，类一摘就回到静止的可见态。 */
+@keyframes ht-veil-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+@keyframes ht-veil-out {
+  from { opacity: 1; transform: none; }
+  to   { opacity: 0; transform: translateY(4px); }
+}
+/* 退出那一下要更快、且立刻放弃命中：淡出的 130ms 里人已经想点底下的东西了，
+   别让一个半透明的层把点击接走。 */
+.ht-set.is-in, .ht-faq.is-in { animation: ht-veil-in var(--ht-d-enter) var(--ht-e-out) both; }
+.ht-set.is-out, .ht-faq.is-out {
+  pointer-events: none;
+  animation: ht-veil-out var(--ht-d-exit) var(--ht-e-in) both;
+}
+
+.st-view { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
+/* 设置页：左分类树 + 右内容（1.12.16）。
+   为什么不再是一条长表单：模板四页 + 界面三十行 + 维护四块，
+   一屏滚到底要滚七八屏，找一项只能靠记位置。分类树把"找"变成"点两下"，
+   而且不在看的组能收起来——收起来之后一屏就看完了。
+   滚动交给 .st-panes：树固定，只有右边这一列在滚（树的折叠与高亮
+   不该跟着内容一起滚走）。 */
+.st-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  padding: 0;
+}
+.st-nav {
+  /* 左边那 16px 是**导轨专用**的留白（参考实现是 .branched-menu 的 padding-left:14px）：
+     导轨贴在这段留白的最左边，主干从留白右侧起算，两者之间才有 28px 的呼吸。
+     不留这一段时导轨会紧贴着主干，两条竖线看起来像画歪了的一对。 */
+  --stn-gutter: var(--ht-s3);
+  position: relative;
+  /* 宽度跟着参数走（1.12.18）：字号、主干位置、圆角一改，分类名占的地方就变了，
+     再钉一个固定宽只会剩两种下场——大字号被截断，小字号白白空出一条。
+     max-content 让这一列永远刚好装下最长的那一项；上限 45% 防止长名字
+     把正文挤没（名字超过 6 个字时才可能碰到这条）。 */
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: 88px;
+  max-width: 45%;
+  padding: var(--ht-s2) var(--ht-s1) var(--ht-s3) var(--stn-gutter);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.st-panes {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: var(--ht-s2) var(--ht-pad-panel) var(--ht-s4) var(--ht-s3);
+  /* 滚动条永远占位：不占的话"内容长到要滚"的那一刻，所有行会整体左移 8px，
+     而页脚不动——两条右边缘就错开了。这是"框体没对齐"最实在的一条。 */
+  scrollbar-gutter: stable;
+}
+.st-nav::-webkit-scrollbar,
+.st-panes::-webkit-scrollbar { width: var(--ht-sb); }
+.st-nav::-webkit-scrollbar-track,
+.st-panes::-webkit-scrollbar-track { background: transparent; }
+.st-nav::-webkit-scrollbar-thumb,
+.st-panes::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: var(--ht-r-pill);
+  background: var(--ht-gray-300);
+  background-clip: padding-box;
+}
+.st-nav:hover::-webkit-scrollbar-thumb,
+.st-panes:hover::-webkit-scrollbar-thumb { background: var(--ht-gray-400); background-clip: padding-box; }
+/* 一页：与旧版的 .st-sec 同一套层次（组标题 / 分节 / 行标签），
+   只是"相邻节之间画分隔线"那条不再需要——一屏只有一页。
+   选择器带 .st-sec 是为了压过下面 .st-sec 的 padding（同一个文件里后写的赢）。 */
+.st-pane.st-sec { padding: var(--ht-s2) 0 var(--ht-s4); }
+/* 全部页铺在一个滚动容器里（1.13.0）：页与页之间给一条细线 + 一段空。
+   "一屏一页"时不需要它，铺开之后没有它，上一页最后一行与下一页标题会读成一块。 */
+.st-pane + .st-pane {
+  margin-top: var(--ht-s4);
+  padding-top: var(--ht-s3);
+  box-shadow: inset 0 1px 0 var(--ht-line);
+}
+
+/* ── 分类树（1.12.17 按官网 CSS 档重做，branched menu）──────
+   三层线，各有各的活：
+     1 导轨（.st-tree::before）  2px，贴在菜单最左边，往下 55% 之后渐隐。
+       它管"这棵树的边界"，不随折叠伸缩。
+     2 主干（每组一段）          展开的分组各画一条竖线，从本组第一行的中点
+       一直画到最后一行；x 是参数 --stn-trunk。
+     3 分支                     竖线折一个圆角（A 命令，半径 --stn-r）拐向右边，
+       越过分类名的左缘 8px 收住。选中那一项另有一段**同路径**的强调色线，
+       靠 stroke-dashoffset 从主干一路"画"到自己——这是这套菜单的签名动作。
+   线段全是算出来的：行高 / 主干位置 / 圆角 / 线宽改一个数，整棵树重新排。
+   所以这里只有容器与观感，几何在 uikit.js 的 navLayout 里。 */
+.st-nav { --stn-indent: calc(var(--stn-trunk) + var(--stn-r) + 14px); }
+.st-tree { position: relative; }
+/* 导轨：参考实现是 left:0 + 2px + 渐隐，暗底上用 --bm-line。
+   浅底上要淡一档（--ht-line），否则 132px 宽的窄列里它比正文还显眼。 */
+.st-tree::before {
+  content: '';
+  position: absolute;
+  /* 导轨贴在 nav 的内边距之外：树自己的坐标原点已经右移了 --stn-gutter，
+     所以往左退同样多，才是"菜单最左边"那一条。 */
+  left: calc(-1 * var(--stn-gutter));
+  top: var(--ht-s2);
+  bottom: 0;
+  width: 2px;
+  /* 2px 宽的竖条配 4px 圆角会被裁成椭圆；用 pill 才是两头圆的线帽 */
+  border-radius: var(--ht-r-pill);
+  background: linear-gradient(to bottom, var(--stn-line) 0%, var(--stn-line) 55%, transparent 100%);
+}
+/* 选中分组时，导轨上滑一根 16px 的亮条。位置由 navLayout 写 top（带过渡），
+   平时 opacity 0——没有选中项时它不该露头。 */
+.stn-marker {
+  position: absolute;
+  top: -1px;
+  left: calc(-1 * var(--stn-gutter));
+  z-index: 1;
+  width: 2px;
+  height: 16px;
+  border-radius: var(--ht-r-pill);
+  background: var(--stn-ac);
+  opacity: 0;
+  transition: top var(--ht-d-enter) var(--ht-e-out), opacity var(--ht-d-tap) ease;
+}
+.stn-marker[data-on] { opacity: 1; }
+
+.stn { display: flex; flex-direction: column; }
+/* 折叠：0fr → 1fr。参考实现用 300ms，比项目里的 tap 档长一档——
+   这一下换的是整段子树的高度，用 160 会像"啪"地弹出来。 */
+.stn-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--stn-fold) var(--ht-e-out);
+}
+.stn[data-open="1"] > .stn-fold { grid-template-rows: 1fr; }
+.stn-body { min-height: 0; overflow: hidden; }
+.stn-tree { position: relative; padding: 6px 0; box-sizing: border-box; }
+
+/* 分组标题。参考实现是"字号 +1、中灰、无底色"：层级靠颜色与缩进，
+   不靠底色块——左边这条导轨已经说明了"这是一组"。
+   收起时也是中灰，展开或选中的那组回到满墨。 */
+.stn-hd {
+  display: block;
+  margin: 0;
+  /* 组标题**不缩进**：它坐在留白右缘、也就是导轨旁边（参考实现里 head 的左右内边距都是 0）。
+     缩进交给子项——层级靠"标题在左、分支向右拐"表达，不靠整块右移。 */
+  padding: var(--ht-s2) var(--ht-s2) var(--ht-s2) 0;
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: none;
+  color: var(--stn-muted);
+  font: var(--ht-w-med) calc(var(--stn-fs) + 1px)/1.25 var(--ht-font);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color var(--ht-d-enter) ease;
+}
+.stn[data-open="1"] > .stn-hd,
+.stn-hd.is-on { color: var(--stn-ink); }
+.stn-hd:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -2px; }
+
+/* 分支线。base 是灰底稿，reach 是强调色的"你在这儿"；
+   两条路径一模一样，只有 dashoffset 不同——所以移动的是"画到哪儿"，不是图形。 */
+.stn-lines {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ht-d-enter) ease;
+}
+.stn[data-open="1"] .stn-lines { opacity: 1; transition: opacity var(--ht-d-enter) ease var(--ht-d-press); }
+.stn-ln {
+  fill: none;
+  stroke: var(--stn-line);
+  stroke-width: var(--stn-lw);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.stn-reach {
+  fill: none;
+  stroke: var(--stn-ac);
+  stroke-width: var(--stn-lw);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: stroke-dashoffset var(--stn-draw) var(--ht-e-out);
+}
+
+/* 叶子（分类项）。文字左缘 = 缩进参数；行高 = 行高参数。
+   没有底色、没有前缀圆点：参考实现里"选中"就是换强调色 + 提一档字重，
+   三层颜色（muted / 满墨 / 强调）已经分得清"在哪一组、在哪一页"。 */
+.stn-i {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: var(--stn-row);
+  padding: 0 var(--ht-s1) 0 var(--stn-indent);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: none;
+  color: var(--stn-muted);
+  font: var(--ht-w-reg) var(--stn-fs)/var(--stn-row) var(--ht-font);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--ht-d-enter) ease;
+}
+.stn-i.is-on { color: var(--stn-ac-d); font-weight: var(--ht-w-med); }
+.stn-i:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -2px; }
+/* 悬停只在真有指针的设备上变色：触屏点一下会留下"悬停"状态，
+   那一行会一直比别的深，看着像选错了页。 */
+@media (hover: hover) and (pointer: fine) {
+  .stn-hd:hover { color: var(--stn-ink); }
+  .stn-i:hover { color: var(--stn-ink); }
+}
+/* 窄视口（面板按 vw 收窄时）不必另立规则：宽度是 max-content，
+   45% 的上限本身就是那道保险。 */
+/* 三级层次，靠"字号 × 字重 × 颜色"三样一起拉，不靠再加装饰：
+     组标题   13px / 粗 / 主色      —— 这一大块管什么
+     分节标题 11px / 粗 / 弱色      —— 同一块里的两件事
+     行标签   12px / 常规 / 中灰    —— 具体一项
+   （1.8.1）及以前组标题和分节标题同为 11px 弱色，看上去是一级，
+   于是整页读下来只剩下"一堆同样重的字"，找不到从哪看起。 */
+.st-sec { padding: var(--ht-s3) 0 var(--ht-s2); }
+/* 组与组之间给 24px，组内行与行只用 4px：分组感是"疏密差"读出来的，
+   不是靠再加一条线。原来组间也是 16px，与组内三段留白同宽，
+   读下来七个组像一长串等距的行。分隔线留着——面板只有 392px 宽、
+   一行接一行，纯留白分不干净，但线只负责收边，分组的活交给间距。 */
+.st-sec + .st-sec:not(.st-pane) {
+  box-shadow: inset 0 1px 0 var(--ht-line);
+  padding-top: var(--ht-s4);
+}
+.st-sec h3 {
+  margin: 0 0 var(--ht-s2);
+  /* （1.12.13）13 → 15：原来组标题只比行标签（12px）大 1px，
+     一页读下来分不出"从哪儿另起一块"。三级要靠字号、字重、颜色**一起**拉开：
+     组标题 15/650/主墨、分节 12/650/次墨、行标签 12/400/三档墨。 */
+  font-size: var(--ht-t5);
+  font-weight: var(--ht-w-bold);
+  letter-spacing: var(--ht-ls-none);
+  color: var(--ht-ink-1);
+}
+.st-h { display: flex; align-items: center; gap: var(--ht-s2); margin-bottom: var(--ht-s1); }
+.st-h h3 { margin: 0; }
+.st-h .st-btn { margin-left: auto; }
+/* 两个按钮并排时，靠右的是这一组而不是其中每一个；
+   不覆盖的话每个按钮各带一份 auto 外边距，中间会裂开一道口子。 */
+/* 一排动作：右端对齐、一律垂直居中（里面既有 .st-btn 也有 .st-hold，
+   两者高度一样但基线不同，按基线排会让红的"删除"比旁边那几颗低一格）。 */
+.st-h-act { margin-left: auto; display: flex; align-items: center; gap: var(--ht-s2); }
+.st-h-act .st-btn { margin-left: 0; }
+
+/* 组内分节（模板组下面的「口径」「人数」）。
+   比组标题弱一档：组标题回答"这一大块管什么"，分节只是把同一块里的
+   两件事隔开，所以字号更小、颜色更浅，靠上方留白分开。
+   墨色取 ink-3 而不是 ink-4：ink-4 是**行内说明**那一档（见 .st-desc），
+   两处字号同为 11px，只差一个字重——分节是骨架、说明是附注，中间隔着
+   整整一级，却长得像同一类字。结构层不跟注释层共用一档色。 */
+.st-sub {
+  margin: var(--ht-s4) 0 var(--ht-s1);
+  padding-top: var(--ht-s3);
+  /* 一条细线压在上方：分节是"同一块里的另一件事"，靠留白加一道内线就够，
+     不加背景块——设置页本来就是一列行，再套一层色块会碎成马赛克。 */
+  box-shadow: inset 0 1px 0 var(--ht-line);
+  font-size: var(--ht-t3);
+  font-weight: var(--ht-w-bold);
+  letter-spacing: var(--ht-ls-wide);
+  /* 再深一档到 ink-1：12px 的加粗字在 ink-2 上仍然只是"深一点的灰"，
+     与下面 12px 的行标签（ink-3）差得太少，扫读时两行看着是同一级。 */
+  color: var(--ht-ink-1);
+}
+
+/* 行内说明（.st-desc）在（1.12.11）撤掉了：二十多行、每行底下一行 11px 灰字，
+   扫读时行与行之间全是字噪音，控件反倒被切碎。解释改挂到标签的 title 上，
+   版面里不再有这一类元素——留着这张样式只会诱使人再放回来。 */
+
+/* 同比的方向胶囊：两个字的按钮，宽度钉死，切换「增加 / 减少」时不抖。
+   两个状态长得一样——这是"多了还是少了"，不是"对还是错"，
+   用红色标「减少」会让人以为界面在报警。 */
+.st-dir {
+  flex: 0 0 auto;
+  min-width: 44px;
+  height: 26px;
+  padding: 0 var(--ht-s2);
+  /* 去边框后底要退一档：bg-1 在 bg-0 上只差 2.4%，没有描边就糊成一片；
+     bg-2 差 4.7%，一眼看得出"这是个能点的块"。 */
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-2);
+  font: var(--ht-w-med) var(--ht-t3)/1 var(--ht-font);
+  cursor: pointer;
+}
+.st-dir:hover { background: var(--ht-bg-3); color: var(--ht-ink-1); }
+.st-dir:active { transform: scale(.97); }
+.st-dir:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+
+/* 跟着方向变的那个字（上升 / 下降）。它不可点，所以用弱色，
+   与旁边那颗按钮区分开——看着像能点却点不动，比不给还糟。 */
+.st-dirw {
+  flex: 0 0 auto;
+  min-width: 26px;
+  font-size: var(--ht-t2);
+  color: var(--ht-ink-4);
+}
+
+/* ── 滑杆（1.12.17 版，界面手感那一页）───────────────────────
+   这一页的每一项都是"稍微大一点 / 慢一点"，让人手打 27.3 既没意义
+   也没法试。滑杆给的是能立刻看见的那一档，右边那个读数只是把当前刻度念出来。
+   accent-color 用的是浏览器自带的滑杆绘制——它有原生手感（拖动、键盘、
+   触摸），自己画一条反而要在三个平台各调一遍。 */
+.st-rngv { flex: 1; gap: var(--ht-s2); min-width: 0; }
+.st-rng {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  accent-color: var(--ht-ac);
+  cursor: pointer;
+}
+.st-rng:focus-visible {
+  outline: none;
+  border-radius: var(--ht-r-xs);
+  box-shadow: 0 0 0 2px rgb(var(--ht-brand-rgb) / .35);
+}
+/* 读数固定 46px：数字宽度不一样（24 / 0.965 / 1100），不钉死的话
+   右边那条竖线会随拖动一抖一抖地跳。 */
+.st-rv {
+  flex: 0 0 46px;
+  text-align: right;
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--ht-ink-2);
+}
+
+/* ── 长按按钮（1.12.17 按官网 CSS 档重做，hold button）──────
+   只有「恢复默认」用它。别的不可撤销动作走两段式（点两次确认）——
+   长按是给"一步清空所有模板与偏好"这一件事的，满屏都是长按按钮等于没有重点。
+
+   移植的是三件事，缺一件就不像：
+     ① 液面用 clip-path 从右往左裁，不是改宽度。改宽度会把圆角拉成方角，
+        裁出来的才是"整块底被推走"，圆角始终是按钮自己的圆角。
+     ② 液面前沿那道起伏是一层 mask（20×200 的波浪 SVG，repeat-y）。
+        mask 的纵向位置跟着 --hold-p 滚，所以起伏是"流过去"的；
+        早先拿一个椭圆贴在填充右缘，放大看只是个毛边。
+     ③ 完成那一下：发光收到最亮 → 一圈脉冲散开 → 标签交叉淡出（带 2px 模糊）。
+   几何：--hold-p（0..1）由 uikit.js 逐帧推；--hold-w / --hold-h 是量出来的
+   真实尺寸（波浪 mask 的位移要按它算）；--hold-cycles = 时长 / 1100，
+   让按住 1.3 秒与按住 3 秒都流过差不多的"几道浪"，而不是按得越久浪越快。 */
+.st-hold {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  isolation: isolate;
+  flex: 0 0 auto;
+  min-width: 44px;
+  height: 26px;
+  margin: 0;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--hold-r);
+  background: var(--hold-bg);
+  color: var(--hold-ink);
+  font: var(--ht-w-med) var(--ht-t3)/1 var(--ht-font);
+  box-shadow: var(--ht-e1);
+  cursor: pointer;
+  outline: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  transition: transform var(--ht-d-tap) var(--ht-e-out),
+    background-color var(--ht-d-tap) ease,
+    box-shadow var(--hold-release) var(--ht-e-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .st-hold:hover { background: color-mix(in srgb, var(--hold-bg) 88%, var(--ht-ba-700)); }
+}
+/* 只在指针按住时缩放：键盘按住不该让按钮"缩一下"，
+   那是手感的反馈，不是状态的反馈。 */
+.st-hold[data-phase="holding"][data-input="pointer"] { transform: scale(var(--hold-scale)); }
+/* 发光：按住期间阴影随时间线性涨满（与液面同一段时长），
+   完成后保持，pulse 再散一圈。关掉起伏开关时也一并关掉发光——
+   它们说的是同一件事："正在推满"。 */
+.st-hold:not([data-glow="off"])[data-phase="holding"],
+.st-hold:not([data-glow="off"])[data-phase="done"] {
+  box-shadow: var(--ht-e1),
+    0 8px 26px -6px color-mix(in srgb, var(--hold-fill) 70%, transparent);
+}
+.st-hold:not([data-glow="off"])[data-phase="holding"] {
+  transition: transform var(--ht-d-tap) var(--ht-e-out),
+    background-color var(--ht-d-tap) ease,
+    box-shadow var(--hold-hold) linear;
+}
+.st-hold:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 2px; }
+/* [hidden] 必须真的不占位：.st-hold 是 inline-grid，会盖掉 UA 的
+   `[hidden] { display: none }`。（1.13.0）「删除」在一份组合时要收起，
+   少了这一句，按钮看不见却还占着 52px，页标题那一排右侧凭空多出一段空白。 */
+.st-hold[hidden] { display: none; }
+
+/* 标签：同一格里叠两份（原位份 + 完成份），靠 opacity 与 2px 模糊交叉。
+   （1.12.16）只换字不淡出，12px 的字"啪"地换掉，像换了个按钮。 */
+.st-hold-label { position: relative; z-index: 2; display: grid; place-items: center; }
+.st-hold-label > span {
+  grid-area: 1 / 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--ht-s1);
+  white-space: nowrap;
+  transition: opacity var(--ht-d-enter) ease, filter var(--ht-d-enter) ease;
+}
+.st-hold-done { opacity: 0; filter: blur(2px); }
+.st-hold[data-phase="done"] .st-hold-idle { opacity: 0; filter: blur(2px); }
+.st-hold[data-phase="done"] .st-hold-done { opacity: 1; filter: blur(0); }
+
+/* 液面与波形都关在这层里：圆角由按钮自己裁，两层都不必各自再算圆角 */
+.st-hold-clip {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  clip-path: inset(0 round var(--hold-r));
+  pointer-events: none;
+}
+/* 液面：右缘被推走。公式与参考实现逐字相同——
+   多出的 0.75 倍波幅让"液面"始终比 crest 那道浪靠前一点，
+   退回时又不会先露出按钮底色。 */
+.st-hold-fill {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--hold-fill);
+  color: var(--hold-fill-ink);
+  clip-path: inset(0 calc((1 - var(--hold-p)) * (100% + .75 * var(--hold-wave)) - var(--hold-p) * .25 * var(--hold-wave)) 0 0);
+}
+/* 波峰：一层重复的波浪 mask，纵向滚动就得到"流动的液面"。
+   波浪本身用 data URI 的 SVG 画（20×200，四个波峰），
+   mask-size 用 --hold-wave 做宽、两倍按钮高做高，接缝落在按钮外。 */
+.st-hold-crest {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--hold-fill);
+  color: var(--hold-fill-ink);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='200' viewBox='0 0 20 200' preserveAspectRatio='none'%3E%3Cpath d='M0 0H10C18 8 18 25.3 10 33.3S2 58.7 10 66.7S18 92 10 100S2 125.3 10 133.3S18 158.7 10 166.7S2 192 10 200H0Z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='200' viewBox='0 0 20 200' preserveAspectRatio='none'%3E%3Cpath d='M0 0H10C18 8 18 25.3 10 33.3S2 58.7 10 66.7S18 92 10 100S2 125.3 10 133.3S18 158.7 10 166.7S2 192 10 200H0Z'/%3E%3C/svg%3E");
+  -webkit-mask-repeat: repeat-y;
+  mask-repeat: repeat-y;
+  -webkit-mask-size: var(--hold-wave) calc(var(--hold-h) * 2);
+  mask-size: var(--hold-wave) calc(var(--hold-h) * 2);
+  -webkit-mask-position-x: calc(-1 * var(--hold-wave) + var(--hold-p) * (var(--hold-w) + var(--hold-wave)));
+  mask-position-x: calc(-1 * var(--hold-wave) + var(--hold-p) * (var(--hold-w) + var(--hold-wave)));
+  -webkit-mask-position-y: calc(-1 * var(--hold-p) * var(--hold-cycles) * var(--hold-h));
+  mask-position-y: calc(-1 * var(--hold-p) * var(--hold-cycles) * var(--hold-h));
+}
+/* 完成时散开的一圈：只在发光开着时出现 */
+.st-hold-pulse {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: var(--hold-r);
+  pointer-events: none;
+  opacity: 0;
+}
+.st-hold:not([data-glow="off"])[data-phase="done"] .st-hold-pulse {
+  animation: st-hold-pulse var(--ht-d-tick) var(--ht-e-out) forwards;
+}
+@keyframes st-hold-pulse {
+  from { opacity: 1; box-shadow: 0 0 0 0 color-mix(in srgb, var(--hold-fill) 55%, transparent); }
+  to { opacity: 0; box-shadow: 0 0 0 14px color-mix(in srgb, var(--hold-fill) 0%, transparent); }
+}
+/* 读屏念的那一句：视觉上不存在，但它是这个交互唯一的说明书 */
+.st-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+/* 系统偏好"减少动态效果"：波浪与缩放都停，只留透明度——
+   液面还是要推满的，那是状态，不是装饰。 */
+@media (prefers-reduced-motion: reduce) {
+  .st-hold { transition: background-color var(--ht-d-tap) ease; }
+  .st-hold[data-phase="holding"][data-input="pointer"] { transform: none; }
+  .st-hold-crest { display: none; }
+  .st-hold-fill { clip-path: inset(0); opacity: 0; transition: opacity var(--hold-release) ease; }
+  .st-hold[data-phase="holding"] .st-hold-fill,
+  .st-hold[data-phase="done"] .st-hold-fill { opacity: 1; transition: opacity var(--hold-hold) linear; }
+  .st-hold-label > span { transition: opacity var(--ht-d-enter) ease; filter: none !important; }
+  .st-hold-pulse { animation: none !important; }
+}
+
+/* 一行塞两个数字框 + 一颗按钮 + 两个字：400 宽的面板里 66px 装不下，
+   这一行单独收窄。必须写 flex 的 0 0——只给 width 的话，flex 容器空间不够时
+   浏览器会把它压到只剩一条缝。（1.8.1）之前就是这样，两个格子窄到看不见。
+   段间距也从 8px 收到 4px：这一行是"一句话的四个零件"，靠得近才读得成句。 */
+.st-row-dir .st-v { gap: var(--ht-s1); }
+.st-row-dir .st-num {
+  flex: 0 0 50px;
+  width: 50px;
+  box-sizing: border-box;
+  padding: 0 var(--ht-s1);
+  text-align: center;
+}
+
+.st-row[hidden] { display: none; }   /* display:flex 会盖掉 UA 给 [hidden] 的 display:none */
+.st-row {
+  display: flex;
+  /* 一行一个"标签 + 控件"。标签列宽固定、控件列靠右——不靠右的话，
+     开关（34px）、数字框（66px）、时间框（118px）、下拉（撑满）四种宽度
+     全部左对齐，右边缘一条参差的锯齿，看着就是"框都没对上"。
+     靠右之后每行共用同一条右边界，像一张真正的设置表。 */
+  align-items: center;
+  gap: var(--ht-s2);
+  /* 说明（.st-desc）占满一整行时换到下一行，行本身结构不变 */
+  flex-wrap: wrap;
+  min-height: 30px;
+  padding: var(--ht-s1) 0;
+}
+/* 行标签是三级里最底下那级（1.12.13）：ink-2 → ink-3。
+   它与分节标题同字号，只能靠颜色分开；上面那级已经压到 ink-2，
+   这一层再压一档，扫读时"组 → 节 → 项"才有纵深。 */
+.st-k {
+  /* 88px 装得下 6 个汉字（13px × 6 = 78）。设置里所有标签都压到 6 字以内，
+     超了就在这里截断——标签撑宽一列，整页的控件列就跟着左移，
+     那才是"一行一行对不上"的来源。 */
+  flex: 0 0 88px;
+  font-size: var(--ht-t3);
+  /* 与控件第一行文字对齐：控件是 26px 高的盒子，靠 flex 居中即可 */
+  line-height: 26px;
+  color: var(--ht-ink-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.st-v {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--ht-s2);
+  min-width: 0;
+}
+/* 单位（秒 / 次 / %）挂在数字框右侧。给固定宽度，让带单位与不带单位的行
+   右边缘偏移量一致——不然"秒"13px、"%"9px 各带偏一点，整列看着像没对齐。 */
+.st-unit { flex: 0 0 auto; min-width: 14px; font-size: var(--ht-t2); color: var(--ht-ink-4); }
+/* 有新版本：琥珀色，比正文重一点点，但不用红色——没装新版不影响出稿 */
+.st-unit.is-new { color: var(--ht-wa-700); }
+
+.st-in {
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  /* 控件面统一 bg-2，与 .st-btn / .st-dir 同层：
+     去掉描边之后，"哪儿能点、哪儿能打字"全靠这三层明度说话——
+       底 bg-0 → 容器 bg-1（+2.4%）→ 控件面 bg-2（+4.7%）。
+     曾经这里是 bg-1（跟容器同层），结果输入框在设置页里几乎隐形：
+     2.4% 的差够分"块"，不够分"能用的东西"。 */
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t3)/1 var(--ht-font);
+}
+/* 聚焦双环（同 .bp-in）。输入框本体无边框，所以双环是全靠投影长出来的：
+   内环实色负责"按下去了"，外环柔光负责"现在轮到你了"。 */
+.st-in:focus {
+  outline: none;
+  background: var(--ht-bg-0);
+  box-shadow: inset 0 0 0 1px var(--ht-ac), 0 0 0 3px rgb(var(--ht-brand-rgb) / .16);
+}
+.st-num { width: 66px; font-variant-numeric: tabular-nums; text-align: right; }
+/* 同步码：等宽字体、稍宽字距，`0` 与 `O`、`1` 与 `l` 一眼能分开。
+   不能加 text-transform: uppercase——码是大小写敏感的，屏幕上显示大写、
+   实际存小写，换一台机器照屏幕敲就取不回来了。 */
+.st-code { flex: 0 1 220px; font-family: var(--ht-mono); letter-spacing: var(--ht-ls-wide); }
+.st-time { width: 118px; font-family: var(--ht-mono); font-variant-numeric: tabular-nums; }
+/* 文本类输入框（用户名称）跟下拉一样撑满：它和下拉是同一类"整行控件"，
+   缩成 130px 靠右停着，左边会平白空出一大块，反倒像漏画了一个格子。
+   数字 / 时间框则相反——它们只有几个字符，按内容宽度靠右才对。 */
+.st-v .st-in[type="text"] { flex: 1 1 auto; }
+.st-in[type="search"] { flex: 0 0 auto; width: 100%; }
+
+/* 多行文案（人数结句 / 人数同比）：撑满整行，按行数长高。
+   这两句是"整句由人维护"，一行的宽度装不下一个人名长度的句子，
+   所以给 textarea 而不是 input。 */
+.st-ta {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 48px;
+  padding: var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-1);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t3)/var(--ht-lh-body) var(--ht-font);
+  resize: vertical;
+}
+.st-ta:focus { outline: 2px solid rgb(var(--ht-brand-rgb) / .45); outline-offset: -1px; }
+
+.st-btn {
+  flex: 0 0 auto;
+  /* 44px 是两个字按钮的最小宽度。用户那两行（当前用户 / 用户名称）尾部各挂两个
+     两字按钮，宽度钉死之后两条控件的右边缘才落在同一条竖线上——不钉的话
+     "确认"比"新建"宽 1~2px，整列就差出一个像素，看着像没对齐。 */
+  min-width: 44px;
+  height: 26px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-2);
+  font: var(--ht-w-med) var(--ht-t3)/1 var(--ht-font);
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease,
+    transform var(--ht-d-press) ease;
+}
+.st-btn:hover { background: var(--ht-bg-3); color: var(--ht-ink-1); }
+.st-btn:active { transform: scale(.97); }
+.st-btn:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+.st-btn[disabled] { opacity: .45; cursor: not-allowed; }
+.st-primary { background: var(--ht-ac); color: var(--ht-bg-0); font-weight: var(--ht-w-bold); }
+.st-primary:hover { background: var(--ht-ac-d); color: var(--ht-bg-0); }
+
+/* 开关：与面板里那几个保持同一观感 */
+.st-sw {
+  position: relative;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  /* 胶囊写 pill 而不是"高度的一半（10px）"：后者高度一改就从胶囊变方角 */
+  border-radius: var(--ht-r-pill);
+  background: var(--ht-bg-3);
+  cursor: pointer;
+  transition: background-color var(--ht-d-tap) var(--ht-e-out);
+}
+.st-sw i {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ht-bg-0);
+  box-shadow: 0 1px 2px rgb(var(--ht-gray-rgb) / .25);
+  transition: transform var(--ht-d-tap) var(--ht-e-out);
+}
+.st-sw[aria-checked="true"] { background: var(--ht-ac); }
+.st-sw[aria-checked="true"] i { transform: translateX(14px); }
+/* 开关也要回应鼠标：它是最容易被"顺手点一下"的控件，
+   之前只有 focus 环，指针划过去毫无反应，看着像张图 */
+.st-sw:hover { background: var(--ht-gray-300); }
+.st-sw[aria-checked="true"]:hover { background: var(--ht-ac-d); }
+.st-sw:active i { box-shadow: 0 1px 2px rgb(var(--ht-gray-rgb) / .25), 0 0 0 3px rgb(var(--ht-brand-rgb) / .1); }
+.st-sw:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 2px; }
+
+/* 多选按钮（1.12.18）：一行一颗，长得像输入框（与 .st-in 同层 bg-2），
+   点开是勾选清单。**不能借用 .st-pick**：那个类属于方案列表里的「选组」，
+   后写的那份规则会把底色改成透明——两个控件共用一个类名，谁在后面谁赢，
+   现场表现是"按钮没有底，只剩一行字和一个三角"。 */
+.st-msel {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  height: 26px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t3)/1 var(--ht-font);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease;
+}
+.st-msel:hover { background: var(--ht-bg-3); }
+.st-msel:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -2px; }
+.st-msel-t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-msel i { flex: 0 0 auto; font-style: normal; font-size: var(--ht-t1); color: var(--ht-ink-4); }
+
+.st-pop {
+  position: absolute;
+  z-index: 8;
+  width: 246px;
+  max-height: 320px;
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-md);
+  background: var(--ht-bg-0);
+  box-shadow: var(--ht-e2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--ht-s1);
+  overflow: auto;
+}
+.st-pop[hidden] { display: none; }
+/* 插入菜单铺满编辑区：浮层若只有 246px 宽又贴着按钮左沿，左侧会露出半截 chip。
+   高度放到 300 是为了七张大类卡片两列四行能完整展开——差 20px 就要滚，
+   而这里滚动条挡住的那一格恰好是最下面那类。 */
+.st-pop.is-wide { left: 4px; right: 4px; width: auto; max-height: 300px; }
+/* 大类页签：只在「点已有标签改指标」时出现。七类一行放不下就换行，
+   不横滚——横滚把最后一类藏起来，人根本不知道还有「同比」。 */
+.st-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ht-s1);
+  padding-bottom: var(--ht-s1);
+  border-bottom: 1px solid var(--ht-bg-3);
+}
+.st-cat {
+  height: 22px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: none;
+  color: var(--ht-ink-3);
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-font);
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease;
+}
+.st-cat:hover { background: var(--ht-bg-2); color: var(--ht-ink-1); }
+.st-cat:active { transform: scale(.97); }
+.st-cat:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+.st-cat.is-on { background: var(--ht-ac-w); color: var(--ht-ac-d); }
+
+/* 大类卡片（0.17 的插入菜单）在 0.19 撤了：七个按钮直接摆在编辑工具栏上，
+   不再有"点插入 → 浮层里点卡片"这一步。这里留一行注释，免得后来人以为
+   样式丢了又照旧加回来。 */
+/* 浮层：外圆角 12、内边距 8，里面的行/按钮按「内 = 外 − 内边距」降到 4。
+   不改 .st-in 本体——设置页正文里它坐在大卡片上，那里 8 是对的。 */
+.st-pop .st-btn, .st-pop-i { border-radius: var(--ht-r-xs); }
+.st-pop-g {
+  padding: var(--ht-s1) var(--ht-s2);
+  font-size: var(--ht-t1);
+  font-weight: var(--ht-w-bold);
+  letter-spacing: var(--ht-ls-wide);
+  color: var(--ht-ink-4);
+}
+.st-pop-i {
+  width: 100%;
+  padding: var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: none;
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t3)/var(--ht-lh-snug) var(--ht-font);
+  text-align: left;
+  cursor: pointer;
+}
+.st-pop-i:hover, .st-pop-i:focus-visible { background: var(--ht-bg-2); outline: none; }
+
+.st-ms { display: flex; flex-direction: column; gap: var(--ht-s1); min-height: 0; }
+.st-ms-list { max-height: 190px; overflow: auto; display: flex; flex-direction: column; }
+.st-ms-i {
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  font-size: var(--ht-t3);
+  cursor: pointer;
+}
+.st-ms-i:hover { background: var(--ht-bg-1); }
+.st-ms-i.on { color: var(--ht-ac); font-weight: var(--ht-w-bold); }
+.st-ms-i input { accent-color: var(--ht-ac); }
+.st-ms-none { padding: var(--ht-s2); font-size: var(--ht-t3); color: var(--ht-ink-4); }
+.st-ms-foot { display: flex; align-items: center; gap: var(--ht-s2); padding-top: var(--ht-nudge); }
+
+.st-cas { display: flex; flex-direction: column; gap: var(--ht-s1); }
+.st-cas-foot { display: flex; padding-top: var(--ht-nudge); }
+
+/* 模板列表 */
+.st-tpls { display: flex; flex-direction: column; gap: var(--ht-s2); }
+
+/* 编哪一套（1.12.15）：日 / 周分段。动作在页标题右端（1.12.18），
+   这一行只剩"现在编的是哪一套"这一个控件。 */
+.st-tpbar {
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  margin: 0 0 var(--ht-s2);
+}
+/* ── 片段组与文稿方案（1.12.15）─────────────────────────────
+   模板组里现在是三条：方案切换行 → 方案里的组（有序）→ 当前组的卡片。
+   组的顺序就是出稿顺序，所以列表用序号说话；"当前在编哪一组"用一圈强调色
+   边框标出来，与下面那块编辑区是同一件事的两处样子。 */
+.st-hint {
+  margin: var(--ht-s1) 0 0;
+  font-size: var(--ht-t2);
+  line-height: var(--ht-lh-snug);
+  color: var(--ht-ink-3);
+}
+.st-plan-hd {
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  margin: var(--ht-s3) 0 var(--ht-s1);
+}
+.st-plan-hd .st-pmeta { margin-left: auto; }
+.st-plist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--ht-s1);
+}
+.st-pitem {
+  display: flex;
+  align-items: center;
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-1);
+  box-shadow: inset 0 0 0 1px var(--ht-line);
+}
+/* 当前编辑的那一组：一圈强调色。与编辑区是"选中的组 ↔ 正在编的内容"，
+   两处指同一件事，只给一处标会让人找不着对应关系。 */
+.st-pitem.is-cur { box-shadow: inset 0 0 0 1px var(--ht-ac); }
+.st-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  /* （1.13.0）baseline → center：序号是等宽数字、名字是汉字、右边是段数，
+     三种字的基线不在一条线上，按基线排会让序号明显偏下。 */
+  align-items: center;
+  gap: var(--ht-s2);
+  padding: var(--ht-s2) var(--ht-s3);
+  border: 0;
+  background: transparent;
+  text-align: left;
+  color: var(--ht-ink-1);
+  font: inherit;
+  cursor: pointer;
+}
+.st-pick:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -2px; }
+.st-pn {
+  flex: 0 0 auto;
+  font-family: var(--ht-mono);
+  font-size: var(--ht-t2);
+  letter-spacing: var(--ht-ls-none);
+  color: var(--ht-ink-3);
+}
+.st-pname {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--ht-t3);
+  font-weight: var(--ht-w-bold);
+}
+.st-pmeta {
+  flex: 0 0 auto;
+  font-size: var(--ht-t2);
+  color: var(--ht-ink-3);
+  white-space: nowrap;
+}
+.st-pacts {
+  flex: 0 0 auto;
+  display: flex;
+  gap: var(--ht-s1);
+  padding-right: var(--ht-s2);
+}
+.st-pb {
+  min-width: 24px;
+  height: 24px;
+  padding: 0 var(--ht-s1);
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: transparent;
+  color: var(--ht-ink-2);
+  font-size: var(--ht-t2);
+  line-height: 1;
+  cursor: pointer;
+}
+.st-pb:hover:not(:disabled) { background: var(--ht-ac-w); color: var(--ht-ac-d); }
+/* 到头的那一头置灰：还能点的方向才是可点的，不必点一下才知道没反应 */
+.st-pb:disabled { opacity: .3; cursor: default; }
+/* 行内改名（组合名）：点「改名」后列表里那一格变输入框。
+   宽度跟着列表走，不再钉 132px —— 组合名可以到 12 个字。 */
+.st-gname-in {
+  width: 132px;
+  padding: var(--ht-s1) var(--ht-s2);
+  border: 1px solid var(--ht-ac);
+  border-radius: var(--ht-r-xs);
+  background: var(--ht-bg-0);
+  color: var(--ht-ink-1);
+  font: inherit;
+  font-size: var(--ht-t3);
+  font-weight: var(--ht-w-bold);
+}
+
+/* 组合里"接的那几段"（1.14.0）：行是**引用**，不是正文。
+   点行不做什么，动作在右边三颗（上移 / 下移 / 移出）——所以行本身不给指针手型，
+   免得让人以为点一下能编辑器打开。 */
+.st-picklist { margin: var(--ht-s3) 0 var(--ht-s2); }
+.st-picklist .st-pick { cursor: default; }
+/* 被「文字模板」页关掉的模板仍列在这里，只是这一期不进稿子。
+   灰掉名字 + 标一句「已停用」；直接藏掉的话，人会以为"我明明加过"。 */
+.st-pitem.is-off .st-pname { color: var(--ht-ink-3); }
+.st-pitem.is-off .st-pn { opacity: .5; }
+/* 行内图标按钮：图标是**描边**画出来的（HT.ICON 的 path 只有线、没有面），
+   不带 stroke 时 fill 一片黑，13px 下看起来就是"按钮是空的"——
+   首屏实测踩到（1.14.0）：三颗只剩最右那个字符 ✕，前两颗像没画。 */
+.st-pb svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vertical-align: middle;
+}
+/* 「添加段落」是这一页唯一的"加入"入口，给它一块虚线位：
+   和上面的实心行区分开，读起来是"这里还能放东西"而不是又一颗普通按钮。 */
+.st-addrow { display: flex; margin-top: var(--ht-s2); }
+.st-addrow .st-btn {
+  min-width: 0;
+  border: 1px dashed var(--ht-line);
+  background: transparent;
+  color: var(--ht-ink-2);
+}
+.st-addrow .st-btn:hover:not([disabled]) {
+  border-color: var(--ht-ac);
+  background: var(--ht-ac-w);
+  color: var(--ht-ac-d);
+}
+
+/* 配置文件的位置：等宽字，读起来像路径而不是一句说明 */
+.st-path { font-family: var(--ht-mono); font-size: var(--ht-t2); letter-spacing: var(--ht-ls-none); }
+/* 「人数」里每日 / 每周各一套行，同一时刻只显示一套。
+   用 display:none 而不是属性隐藏：屏幕阅读器不会念到藏起来的那四个框，
+   Tab 也走不到——两套同样的问题配两个同样的问题，本来就只该被读到一遍。 */
+.st-body[data-casset="day"] .st-row[data-set="week"],
+.st-body[data-casset="week"] .st-row[data-set="day"] { display: none; }
+.st-tpl {
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-1);
+  overflow: hidden;
+}
+.st-tpl.is-ed { background: var(--ht-bg-0); box-shadow: var(--ht-e1), 0 0 0 1px var(--ht-bg-3); }
+.st-tpl-h { display: flex; align-items: center; gap: var(--ht-s2); padding: var(--ht-s2); }
+.st-tin {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: transparent;
+  color: var(--ht-ink-1);
+  font: var(--ht-w-bold) var(--ht-t4)/1 var(--ht-font);
+}
+.st-tin:hover { background: var(--ht-bg-2); }
+.st-tin:focus { background: var(--ht-bg-0); outline: 2px solid rgb(var(--ht-brand-rgb) / .4); outline-offset: -1px; }
+.st-sum { flex: 0 0 auto; font-size: var(--ht-t1); color: var(--ht-ink-4); white-space: nowrap; }
+.st-ops { flex: 0 0 auto; display: flex; gap: var(--ht-s1); }
+.st-ops button {
+  height: 22px;
+  min-width: 22px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-xs);
+  background: transparent;
+  color: var(--ht-ink-3);
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-font);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--ht-d-press) ease, color var(--ht-d-press) ease,
+    transform var(--ht-d-press) ease;
+}
+/* 段落操作三枚图标（Tabler Outline）：与文字按钮同高，线宽 2 */
+.st-ops button svg {
+  width: 13px;
+  height: 13px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.st-ops button:hover { background: var(--ht-bg-2); color: var(--ht-ink-1); }
+.st-ops button:active { background: var(--ht-bg-3); transform: scale(.94); }
+.st-ops button:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: -1px; }
+.st-ops button[disabled] { opacity: .35; cursor: not-allowed; }
+
+/* 正文编辑区：chip 与文字混排，见 settings.js 的 toEditor / readEditor */
+.st-ed { padding: 0 var(--ht-s2) var(--ht-s2); }
+/* 工具栏 = 七大类各一个按钮，点一下直接把该类默认项落到光标处（0.19.0）。
+   以前只有一个「插入」，点开还要在浮层里再选一次大类——插一个数要两步，
+   而九成的插入就是"接处警总数""有效条目起数"这么几个。
+   窄屏（设置页并排两栏时只有 340 上下）允许换行，不许横向溢出。 */
+.st-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--ht-s1);
+  padding: var(--ht-s1) 0 var(--ht-s2);
+}
+.st-tools button {
+  height: 22px;
+  padding: 0 var(--ht-s2);
+  border: 0;
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-ac-w);
+  color: var(--ht-ac-d);
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-font);
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, transform var(--ht-d-press) ease;
+}
+.st-tools button:hover { background: var(--ht-ac-w2); }
+.st-tools button:active { background: var(--ht-ac-w2); transform: scale(.96); }
+.st-tools button:focus-visible { outline: 2px solid var(--ht-ac); outline-offset: 1px; }
+
+.st-ce {
+  min-height: 96px;
+  max-height: 220px;
+  overflow: auto;
+  padding: var(--ht-s2);
+  border-radius: var(--ht-r-sm);
+  background: var(--ht-bg-1);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t4)/var(--ht-lh-body) var(--ht-font);
+  white-space: pre-wrap;
+  word-break: break-word;
+  cursor: text;
+  /* 与面板里的正文区同一层：这是"写模板"的表面，给一线浮起说明可点进去 */
+  box-shadow: var(--ht-e1);
+}
+.st-ce:focus {
+  outline: none;
+  background: var(--ht-bg-0);
+  box-shadow: inset 0 0 0 1px var(--ht-ac), 0 0 0 3px rgb(var(--ht-brand-rgb) / .16);
+}
+.st-ce:empty::before {
+  content: "写正文。点上面「插入」选一类，默认项直接落进来；再点它可换成同类的别的数";
+  color: var(--ht-ink-4);
+  font-size: var(--ht-t3);
+}
+
+/* ── 逐字晕开（手动打字）───────────────────────────────
+   刚上屏的字从 blur(6px) 化开，单字 90ms（与按压同档：都是"手指一动"的即时反馈）。
+   相邻字错开 30ms 由 JS 写在 style 上，这里只管一个字本身。
+   为什么是 blur 而不是缩放/位移：打字是"墨落到纸上"，缩放会让人以为字在长个儿，
+   位移会让行内文字互相挤；模糊化开是唯一不改变占位与行宽的做法。
+   字数超过 24 的整串不演，交给 JS 判（见 editor.js 的 inkNewChars）。 */
+.st-ce .ch {
+  animation: ht-type var(--ht-d-press) var(--ht-e-out) both;
+}
+@keyframes ht-type {
+  from { filter: blur(6px); opacity: .3; }
+  to { filter: blur(0); opacity: 1; }
+}
+/* 占位符 chip：不可编辑的一小块，序列化见 settings.js */
+.st-ce .tk {
+  display: inline-block;
+  margin: 0 var(--ht-s1);
+  padding: 0 var(--ht-s2);
+  border-radius: var(--ht-r-xs);
+  background: var(--ht-ac-w);
+  color: var(--ht-ac-d);
+  font-size: var(--ht-t2);
+  font-weight: var(--ht-w-bold);
+  line-height: var(--ht-lh-body);
+  white-space: nowrap;
+  user-select: all;
+  /* 标签是可点的：点它换成另一个指标（见 settings.js 的 openChipEditor）。
+     指针与悬停都要这么说，否则它看起来只是正文里一块带底色的小字。 */
+  cursor: pointer;
+  transition: background-color var(--ht-d-press) ease, box-shadow var(--ht-d-press) ease;
+}
+.st-ce .tk:hover {
+  background: var(--ht-ac-w2);
+  box-shadow: 0 0 0 1px rgb(var(--ht-brand-rgb) / .3);
+}
+.st-ce .tk:active { box-shadow: 0 0 0 1px var(--ht-ac); }
+
+/* ── 两个动作：面板里挂头部右上角（1.9.1），独立设置页退回页脚 ──────
+   底栏是为对话框准备的：一页内容滚到底，才在最后看见"保存"，中间改了什么都
+   不知道存没存。设置不是对话框，它是一页内容——动作属于页头。
+   页脚那套仍然留着：options.html 的挂载点没有头部这一行。 */
+.st-hats {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  min-width: 0;
+}
+/* 头部这一行按返回按钮定高（24px），按钮跟着收。
+   不设 min-width：44px 是给"两字按钮列对齐"用的，这里只有一颗，硬撑反而
+   把「保存」挤到边缘。
+
+   标题与按钮都必须 nowrap：提示条一长（"已保存。模板里有 12 个占位符被移除…"），
+   flex 会去压缩同行**最能屈**的那一项——先是标题被折成两行，头部从 39 撑到 56，
+   整个设置页跟着往下错。让它们不折，压力就只落在提示条自己身上，
+   而它有省略号兜底。 */
+.st-head > b,
+.st-head .st-btn { flex: 0 0 auto; white-space: nowrap; }
+.st-head .st-btn { height: 24px; min-width: 0; }
+/* 「恢复默认」是退路，不是与「保存」并列的动作：给底色会让人以为两颗同级。
+   弱一档墨色、无底色，悬停才浮出来。 */
+.st-quiet { background: transparent; color: var(--ht-ink-3); }
+.st-quiet:hover { background: var(--ht-bg-2); color: var(--ht-ink-1); }
+/* 提示条挤在标题与按钮之间，必须能收窄：保存失败的句子比这行余量长，
+   让它省略号收尾、全文进 title——不能因为一句话把「保存」挤出屏幕。 */
+.st-head .st-msg {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.st-foot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  padding: var(--ht-s2) var(--ht-pad-panel);
+  /* 底色必须写实：滚动区被裁的那一行会正好切在这条线上，
+     页脚透明时最后一行看着像"被文字压住"而不是"滚出去了"。 */
+  background: var(--ht-bg-0);
+  box-shadow: inset 0 1px 0 var(--ht-line);
+}
+/* 页脚在滚动区之外，所以它没有滚动条占的那 8px。
+   补上之后"保存"的右边缘才与上面每一行的右边缘落在同一条竖线上。
+   只在面板浮层里补：独立设置页（options.html）的正文不滚，补了反而多出 8px。 */
+.ht-set .st-foot { padding-right: calc(var(--ht-pad-panel) + var(--ht-sb)); }
+.st-sp { flex: 1; }
+/* 页脚提示（保存结果、下载回执）。原来是 11px 的 ink-3——和"行内说明"
+   同档，可它是**操作结果**，不是注释：点了保存，眼睛先找的就是这一行。
+   提到 12px / ink-2，与行标签同一档；仍弱于主按钮，不抢"保存"的注意力。 */
+.st-msg { font-size: var(--ht-t3); color: var(--ht-ink-2); }

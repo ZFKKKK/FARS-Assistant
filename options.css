@@ -1,0 +1,89 @@
+/* options.css —— 独立设置页的**页面外壳**
+ *
+ * 设置控件本身的样式在 panel.css 的 `.st-*` 一段里——面板浮层与这一页
+ * 挂的是同一个 settings.js，所以控件只有一份样式。
+ * 这里只管"页面级"的东西：背景、居中宽度、头部那三样（图标/名字+版本/一句介绍）。
+ *
+ * 配色与字号一律取 panel.css 的令牌：这一页通过 options.html 里的 <link>
+ * 先引入 panel.css（令牌挂在 `:root` 上），再引入本文件。
+ * 早期这一页自己定义了一套 --ink-* / --bg-* 别名，两套名字各写各的色号，
+ * 改主题时改一处、漏一处，"设置页比面板浅一个色阶"就是这么来的——现在只剩一套。
+ */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+
+body {
+  background: var(--ht-bg-2);
+  color: var(--ht-ink-1);
+  font: var(--ht-w-reg) var(--ht-t4)/var(--ht-lh-body) var(--ht-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 640px;
+  margin: 0 auto;
+  /* 页面外边距与卡片内边距取同一档（24），标题与正文才在同一条竖线上 */
+  padding: var(--ht-s6) var(--ht-s4);
+}
+
+/* ── 头部：图标 / 名字+版本 / 一句介绍，各占一个视线落点 ── */
+.top {
+  display: flex;
+  align-items: center;
+  gap: var(--ht-s2);
+  margin-bottom: var(--ht-s3);
+  padding: 0 var(--ht-s1);
+}
+.mark { flex: 0 0 auto; width: 34px; height: 34px; }
+.mark svg {
+  width: 34px; height: 34px; display: block; overflow: visible;
+  filter: drop-shadow(0 2px 5px rgb(var(--ht-gray-rgb) / .16));
+}
+.mark .m-face { fill: var(--ht-gray-800); }
+.mark .m-eye { fill: var(--ht-bg-0); }
+.mark .m-rod { stroke: var(--ht-gray-800); stroke-width: 1.5; stroke-linecap: round; opacity: .5; }
+.mark .m-dot { fill: var(--ht-ok-b); }
+
+.top h1 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--ht-s2);
+  margin: 0;
+  font-size: var(--ht-t6);
+  font-weight: var(--ht-w-bold);
+  /* 17px 是大字号，字距要收紧一档；原来写 snug（-.01em），大字的默认间距显散 */
+  letter-spacing: var(--ht-ls-tight);
+}
+/* 版本号小一号、贴在名字右下——它只是"这份清单是哪一版"，不是标题的一部分 */
+.top .ver {
+  font: var(--ht-w-med) var(--ht-t2)/1 var(--ht-mono);
+  font-style: normal;
+  color: var(--ht-ink-4);
+  font-variant-numeric: tabular-nums;
+  align-self: flex-end;
+  padding-bottom: var(--ht-s1);
+  user-select: all;
+}
+.top .ver.is-stale { color: var(--ht-ba); }
+.top .lead {
+  margin: 0 0 0 auto;
+  font-size: var(--ht-t3);
+  color: var(--ht-ink-3);
+  white-space: nowrap;
+}
+
+/* ── 挂载点：settings.js 往这里画。面板里是 400px，这里是 640px ── */
+.host {
+  background: var(--ht-bg-0);
+  border-radius: var(--ht-r-md);
+  box-shadow: var(--ht-e1);
+  overflow: hidden;
+}
+.host .st-body { overflow: visible; padding: var(--ht-s2) var(--ht-s4); }
+.host .st-foot { padding: var(--ht-s2) var(--ht-s4) var(--ht-s3); }
+.host .st-ce { max-height: 420px; }
+
+@media (max-width: 520px) {
+  .wrap { padding: var(--ht-s4) var(--ht-s3) var(--ht-s6); }
+  .top .lead { display: none; }
+}

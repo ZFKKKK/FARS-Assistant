@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>简报助手 · 设置</title>
+<link rel="stylesheet" href="panel.css">
+<link rel="stylesheet" href="options.css">
+</head>
+<body>
+<!--
+  这一个页面只是「设置视图」的宿主。
+  设置本身写在 src/ui/settings.js，面板里的齿轮浮层挂的是同一个模块——
+  两个挂载点、一份实现，所以不存在"面板里改了、设置页没改"这种偏差。
+  正常使用不需要打开这个页面：面板里点齿轮就是设置。
+  它保留只为两件事：chrome://extensions 的「扩展选项」要有落点，
+  以及想把设置摊在大屏上慢慢看的时候。
+-->
+<div class="wrap">
+  <header class="top">
+    <div class="mark"><svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+      <line class="m-rod" x1="16" y1="11" x2="16" y2="6.6"/>
+      <circle class="m-dot" cx="16" cy="5.4" r="2.6"/>
+      <rect class="m-face" x="3.2" y="11" width="25.6" height="17.9" rx="7.2"/>
+      <ellipse class="m-eye" cx="11" cy="20" rx="2.5" ry="4.2"/>
+      <ellipse class="m-eye" cx="21" cy="20" rx="2.5" ry="4.2"/>
+    </svg></div>
+    <h1>简报助手<i class="ver" id="ver">v—</i></h1>
+    <p class="lead">多用户档案 · 模板可配 · 一键成文</p>
+  </header>
+  <div class="host" id="host"></div>
+</div>
+
+<script src="src/lib/util.js"></script>
+<script src="src/lib/obs.js"></script>
+<script src="src/lib/req.js"></script>
+<!-- 顺序与 debug/files.js 的 CORE 一致：errors / release / contract 是 config 的前置 -->
+<script src="src/data/errors.js"></script>
+<script src="src/data/release.js"></script>
+<script src="src/data/contract.js"></script>
+<script src="src/data/config.js"></script>
+<script src="src/data/cloud.js"></script>
+<script src="src/data/settings-schema.js"></script>
+<script src="src/data/window.js"></script>
+  <script src="src/data/cas-last.js"></script>
+<script src="src/data/faq.js"></script>
+<script src="src/data/http.js"></script>
+<script src="src/domain/render.js"></script>
+<script src="src/domain/segments.js"></script>
+<script src="src/domain/phrases.js"></script>
+<script src="src/domain/checks.js"></script>
+<script src="src/domain/report.js"></script>
+<script src="src/ui/dom.js"></script>
+<script src="src/ui/uikit.js"></script>
+<script src="src/ui/feedback.js"></script>
+<script src="src/ui/editor.js"></script>
+<script src="src/ui/settings.js"></script>
+<script src="options.js"></script>
+</body>
+</html>
